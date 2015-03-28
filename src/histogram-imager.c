@@ -5,7 +5,7 @@
  *                      color interpolation, and exposure adjustment.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2006 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -133,7 +133,7 @@ histogram_imager_init_size_params (GObjectClass *object_class)
     spec = g_param_spec_uint         ("width",
 				      "Width",
 				      "Width of the rendered image, in pixels",
-				      1, 10000, 600,
+				      1, 32767, 600,
 				      G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED | PARAM_IN_GUI);
     param_spec_set_group             (spec, current_group);
     param_spec_set_increments        (spec, 1, 16, 0);
@@ -142,7 +142,7 @@ histogram_imager_init_size_params (GObjectClass *object_class)
     spec = g_param_spec_uint         ("height",
 				      "Height",
 				      "Height of the rendered image, in pixels",
-				      1, 10000, 600,
+				      1, 32767, 600,
 				      G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED | PARAM_IN_GUI);
     param_spec_set_group             (spec, current_group);
     param_spec_set_increments        (spec, 1, 16, 0);
@@ -1026,7 +1026,7 @@ histogram_imager_compute_quality (HistogramImager *self)
 	int width = self->width * self->oversample;
 	int height = self->height * self->oversample;
 	int x, y, x_scale, y_scale;
-	int stride;
+	guint stride;
 
 	gulong denominator = 0;
 	gulong num_saturated = 0;

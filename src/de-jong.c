@@ -4,7 +4,7 @@
  *             objects to provide a rendering of the DeJong map into a histogram image.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2006 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -613,6 +613,7 @@ static void de_jong_get_property (GObject *object, guint prop_id, GValue *value,
 void de_jong_calculate(IterativeMap *map, guint iterations) {
     /* Copy frequently used parameters to local variables */
     DeJong *self = DE_JONG(map);
+    HistogramImager *hi = HISTOGRAM_IMAGER(map);
     const gboolean tileable = self->tileable;
     const DeJongParams param = self->param;
 
@@ -626,12 +627,20 @@ void de_jong_calculate(IterativeMap *map, guint iterations) {
     const gboolean aspect_enabled = self->aspect > 1.0001 || self->aspect < 0.9999;
     const gboolean matrix_enabled = aspect_enabled || rotation_enabled;
     const gboolean emphasize_transient = self->emphasize_transient;
+    const gboolean oversample_enabled = hi->oversample > 1;
 
     /* Blurring variables */
     int blur_table_size = 0;
     int blur_ratio_period = 0;
     int blur_index = 0, blur_ratio_index = 0, blur_ratio_threshold = 0;
     float *blur_table = NULL;
+
+    /* Oversampling irregularity table.
+     * Fixed size for now. Must be a power of two! 
+     */
+    const int oversample_table_size = 32;
+    int oversample_index = 0;
+    float oversample_table[oversample_table_size];
 
     /* Rotation/aspect matrix variables */
     double sine_rotation, cosine_rotation, mat_a = 0, mat_b = 0, mat_c = 0, mat_d = 0;
@@ -687,8 +696,12 @@ void de_jong_calculate(IterativeMap *map, guint iterations) {
 
 	/* Allocate and fill the blur table */
 	blur_table = alloca(blur_table_size * sizeof(blur_table[0]));
-	for (i=0; i<blur_table_size; i++)
-	    blur_table[i] = normal_variate() * self->blur_radius;
+	for (i=0; i<blur_table_size; i+=2) {
+	    double a, b;
+	    normal_variate_pair(&a, &b);
+	    blur_table[i] = a * self->blur_radius;
+	    blur_table[i+1] = b * self->blur_radius;
+	}
 	blur_index = 0;
 
 	/* Initialize the blur ratio counter and threshold */
@@ -696,6 +709,17 @@ void de_jong_calculate(IterativeMap *map, guint iterations) {
 	blur_ratio_period = 1024;
 	blur_ratio_threshold = self->blur_ratio * blur_ratio_period;
     }
+
+    /* Initialize the oversample irregularity table. When we're oversampling, we
+     * add +/- 1 subpixel of noise to the image in order to achieve the same effect
+     * as irregular-grid FSAA: avoiding unpleasant interference patterns by filtering
+     * out very high-frequency details that will generate aliasing artifacts.
+     */
+    if (oversample_enabled) {
+	for (i=0; i<oversample_table_size; i++)
+	    oversample_table[i] = uniform_variate() * 2 - 1;
+	oversample_index = 0;
+    }	
 
     point_x = self->point_x;
     point_y = self->point_y;
@@ -765,6 +789,15 @@ void de_jong_calculate(IterativeMap *map, guint iterations) {
 	x = x * scale + xcenter;
 	y = y * scale + ycenter;
 
+	/* Apply the random oversampling jitter, if applicable */
+	if (oversample_enabled) {
+	    x += oversample_table[oversample_index];
+	    oversample_index = (oversample_index+1) & (oversample_table_size-1);
+	    y += oversample_table[oversample_index];
+	    oversample_index = (oversample_index+1) & (oversample_table_size-1);
+	}
+
+
 	/* Convert (x,y) to integers.
 	 * Note that just casting to int here is incorrect! We want the behaviour
 	 * of floor(), always rounding toward -inf rather than zero. This should
@@ -801,8 +834,7 @@ void de_jong_calculate(IterativeMap *map, guint iterations) {
 
     histogram_imager_finish_plots(HISTOGRAM_IMAGER(self), &plot);
     ITERATIVE_MAP(self)->iterations += iterations;
-    self->point_x = point_x;
-    self->point_y = point_y;
+    self->point_x = point_x;    self->point_y = point_y;
     self->remaining_transient_iterations = remaining_transient_iterations;
 }
 
@@ -865,8 +897,7 @@ void initial_func_square_uniform (gdouble *x, gdouble *y) {
 
 void initial_func_gaussian (gdouble *x, gdouble *y) {
     /* Just a unit normal in each axis */
-    *x = normal_variate();
-    *y = normal_variate();
+    normal_variate_pair(x, y);
 }
 
 void initial_func_circular_uniform (gdouble *x, gdouble *y) {
@@ -905,9 +936,11 @@ void initial_func_sphere (gdouble *x, gdouble *y) {
      * We currently implement this by normalizing the vector produced
      * by three normal variates- this is really slow.
      */
-    gdouble vx = normal_variate();
-    gdouble vy = normal_variate();
-    gdouble vz = normal_variate();
+    gdouble vx, vy, vz, vq;
+
+    normal_variate_pair(&vx, &vy);
+    normal_variate_pair(&vz, &vq);
+
     gdouble mag = sqrt(vx*vx + vy*vy + vz*vz);
     *x = vx / mag;
     *y = vy / mag;

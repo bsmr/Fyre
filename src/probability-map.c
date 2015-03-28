@@ -4,7 +4,7 @@
  *                     distribution function defined as an image.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2006 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -324,9 +324,13 @@ void             probability_map_gaussian         (ProbabilityMap*       self,
 						   gdouble*              y,
 						   double                radius)
 {
+    double a, b;
+
     probability_map_normalized(self, x, y);
-    *x += normal_variate() * self->image_scale_x * radius;
-    *y += normal_variate() * self->image_scale_y * radius;
+
+    normal_variate_pair(&a, &b);
+    *x += a * self->image_scale_x * radius;
+    *y += b * self->image_scale_y * radius;
 }
 
 /* The End */

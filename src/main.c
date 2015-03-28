@@ -3,7 +3,7 @@
  * main.c - Initialization and command line interface
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2006 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -81,7 +81,7 @@ int main(int argc, char ** argv) {
 #endif
     GError *error = NULL;
 
-    g_random_set_seed(time(NULL));
+    math_init();
     g_type_init();
     have_gtk = gtk_init_check(&argc, &argv);
 

@@ -3,7 +3,7 @@
  * math-util.h - Small math utilities shared by other modules
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2006 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,8 +24,12 @@
 #ifndef __MATH_UTIL_H__
 #define __MATH_UTIL_H__
 
-float uniform_variate();
-float normal_variate();
+void math_init();
+
+int int_variate(int minimum, int maximum);
+double uniform_variate();
+void normal_variate_pair(double *a, double *b);
+
 int find_upper_pow2(int x);
 
 #endif /* __MATH_UTIL_H__ */
