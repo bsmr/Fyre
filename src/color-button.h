@@ -1,8 +1,8 @@
 /*
- * Interactive color selection button. This is a composite widget
- * that shows a color sample inside a button. When the button is clicked,
- * a color picker with auto-apply modifies the color sample and sends the
- * 'changed' signal.
+ * color-button.h - Interactive color selection button. This is a composite
+ *                  widget that shows a color sample inside a button. When
+ *                  the button is clicked, a color picker with auto-apply
+ *                  modifies the color sample and sends the 'changed' signal.
  *
  * de Jong Explorer - interactive exploration of the Peter de Jong attractor
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
@@ -51,6 +51,10 @@ struct _ColorButton {
   gchar *title;
   GdkColor previous_color;
   GdkColor color;
+  guint16 previous_alpha;
+  guint16 alpha;
+
+  gboolean ignore_changes;
 };
 
 struct _ColorButtonClass {
@@ -60,12 +64,17 @@ struct _ColorButtonClass {
 };
 
 GType      color_button_get_type(void);
-GtkWidget* color_button_new(const char *title, GdkColor *defaultColor);
+GtkWidget* color_button_new_with_defaults(const char *title, GdkColor *default_color, guint16 default_alpha);
+GtkWidget* color_button_new(const char *title);
+
 void       color_button_set_color(ColorButton *cb, GdkColor *c);
 void       color_button_get_color(ColorButton *cb, GdkColor *c);
+void       color_button_set_alpha(ColorButton *cb, guint16 alpha);
+guint16    color_button_get_alpha(ColorButton *cb);
+void       color_button_set_color_and_alpha(ColorButton *cb, GdkColor *c, guint16 alpha);
 
 G_END_DECLS
 
-#endif /* __COLOR_BUTTON_H */
+#endif /* __COLOR_BUTTON_H__ */
 
 /* The End */

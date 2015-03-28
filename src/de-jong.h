@@ -1,5 +1,6 @@
 /*
- * de-jong.h - Shared declarations
+ * de-jong.h - The DeJong object builds on the ParameterHolder and HistogramRender
+ *             objects to provide a rendering of the DeJong map into a histogram image.
  *
  * de Jong Explorer - interactive exploration of the Peter de Jong attractor
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
@@ -20,66 +21,65 @@
  *
  */
 
-#include <gtk/gtk.h>
-
-#ifndef __DE_JONG_H_
+#ifndef __DE_JONG_H__
 #define __DE_JONG_H__
 
-struct vector2 {
-  double x,y;
+#include <gtk/gtk.h>
+#include "histogram-imager.h"
+
+G_BEGIN_DECLS
+
+#define DE_JONG_TYPE            (de_jong_get_type ())
+#define DE_JONG(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), DE_JONG_TYPE, DeJong))
+#define DE_JONG_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), DE_JONG_TYPE, DeJongClass))
+#define IS_DE_JONG(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), DE_JONG_TYPE))
+#define IS_DE_JONG_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), DE_JONG_TYPE))
+
+typedef struct _DeJong      DeJong;
+typedef struct _DeJongClass DeJongClass;
+
+typedef struct {
+  gdouble a, b, c, d;
+} DeJongParams;
+
+struct _DeJong {
+  HistogramImager parent;
+
+  /* Calculation Parameters */
+  DeJongParams param;
+  gdouble zoom, xoffset, yoffset, rotation;
+  gdouble blur_radius, blur_ratio;
+  gboolean tileable;
+  gboolean calc_dirty_flag;
+
+  /* Current calculation state */
+  gdouble point_x, point_y;
+  gdouble iterations;
 };
 
-struct computation_params {
-  double a, b, c, d;
-  double zoom, xoffset, yoffset, rotation;
-  double blur_radius, blur_ratio;
-};
-
-struct render_params {
-  guint width, height;
-  guint oversample;
-  guint *counts;
-  guint32 *pixels;
-
-  guint color_table_size;
-  guint32 *color_table;
-
-  double iterations;
-  guint current_density;
-  guint target_density;
-
-  double exposure, gamma;
-  GdkColor fgcolor, bgcolor;
-  gboolean clamped;
-
-  gboolean dirty_flag;
+struct _DeJongClass {
+  HistogramImagerClass parent_class;
 };
 
 
-extern struct computation_params params;
-extern struct render_params render;
+/************************************************************************************/
+/******************************************************************* Public Methods */
+/************************************************************************************/
 
+GType      de_jong_get_type         ();
+DeJong*    de_jong_new              ();
 
-/* main.c */
-void set_defaults();
-gchar* save_parameters();
-gboolean set_parameter(const char *key, const char *value);
-void load_parameters(const gchar *paramstring);
-void load_parameters_from_file(const char *name);
-void save_to_file(const char *name);
+void       de_jong_calculate        (DeJong                *self,
+				     guint                  iterations);
 
-/* render.c */
-float uniform_variate();
-float normal_variate();
-void resize(int w, int h, int oversample);
-void update_pixels();
-void clear();
-void run_iterations(int count);
+void       de_jong_calculate_motion (DeJong                *self,
+				     guint                  iterations,
+				     gboolean               continuation,
+				     ParameterInterpolator *interp,
+				     gpointer               interp_data);
 
-/* interface.c */
-void interactive_main(int argc, char **argv);
+G_END_DECLS
 
-
-#endif /* __DE_JONG_MAIN_H__ */
+#endif /* __DE_JONG_H__ */
 
 /* The End */

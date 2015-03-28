@@ -1,7 +1,7 @@
 ==================
  de Jong Explorer
 ==================
-Version 0.3
+Version 0.5
 
 Introduction
 ------------
@@ -14,12 +14,13 @@ All the images you can create with this program are based on the simple
 Peter de Jong map equations:
 
    x' = sin(a * y) - cos(b * x)
-   y' = sin(c * x) - cos(c * y)
+   y' = sin(c * x) - cos(d * y)
 
-The point (x,y) moves chaotically. The resulting image is a map of the
-probability that the point lies within the area represented by each
-pixel. As you let the de Jong Explorer render longer, it collects more
-samples and this probability map, the image, becomes more accurate.
+For most values of a,b,c and d the point (x,y) moves chaotically. The
+resulting image is a map of the probability that the point lies within
+the area represented by each pixel. As you let the de Jong Explorer
+render longer it collects more samples and this probability map and the
+image becomes more accurate.
 
 The resulting probability map is treated as a High Dynamic Range image.
 This software includes some image manipulation features that let you
@@ -53,6 +54,34 @@ rendering process. These lines include:
   - speed in iterations per second
   - current and target peak density values
   - elapsed and estimated remaining time
+
+
+Animation
+---------
+
+de Jong Explorer now includes a somewhat experimental animation system.
+From the main explorer window, use View -> Animation window to open the
+animation interface. Animations are represented as a list of keyframes,
+with a transition after each. Keyframes can be manipulated with the
+buttons at the top of the window. Transitions consist of a duration, in
+seconds, and an editable curve. This curve's presets can be used to
+transition linearly or ease in and out of keyframes, but you can also
+edit the curve for more complex effects.
+
+Each keyframe in the list also shows you the bifurcation diagram between
+that keyframe's parameters and the next. Intense black dots or lines in
+the bifurcation diagrams are fixed points or limit cycles, which usually
+don't look good in animation.
+
+You can preview the animation by dragging the two horizontal seek bars,
+or using the 'play' button. The keyframe list can be loaded from and
+saved to a custom binary format. Once you have an animation you like,
+you can get a higher quality version using File -> Render. The result
+will be an uncompressed .AVI file. You can use tools like mencoder or
+transcode to compress this file with your favorite codec.
+
+Animations can also be rendered from the command line using the -n and
+-o options together.
 
 
 Dependencies

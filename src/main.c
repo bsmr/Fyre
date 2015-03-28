@@ -1,5 +1,5 @@
 /*
- * main.c - Command line interface, parameter loading and saving, and other such glue
+ * main.c - Initialization and command line interface
  *
  * de Jong Explorer - interactive exploration of the Peter de Jong attractor
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
@@ -25,24 +25,34 @@
 #include <time.h>
 #include <getopt.h>
 #include "de-jong.h"
+#include "animation.h"
+#include "explorer.h"
+#include "avi-writer.h"
 
-static void usage(char **argv);
-static void render_main(const char *filename);
-static gchar* describe_color(GdkColor *c);
-static void set_size_from_string(const char *s);
-
-struct computation_params params;
-struct render_params render;
+static void usage                  (char       **argv);
+static void animation_render_main  (DeJong      *dejong,
+				    Animation   *animation,
+				    const gchar *filename,
+				    gulong       target_density);
+static void image_render_main      (DeJong      *dejong,
+				    const gchar *filename,
+				    gulong       target_density);
 
 
 int main(int argc, char ** argv) {
+  DeJong* dejong;
+  Animation* animation;
+  gboolean animate = FALSE;
   enum {INTERACTIVE, RENDER} mode = INTERACTIVE;
-  const char *outputFile;
+  const gchar *outputFile;
   int c, option_index=0;
+  gulong target_density = 10000;
 
   srand(time(NULL));
   g_type_init();
-  set_defaults();
+
+  dejong = de_jong_new();
+  animation = animation_new();
 
   while (1) {
     static struct option long_options[] = {
@@ -61,35 +71,57 @@ int main(int argc, char ** argv) {
       {"density",     1, NULL, 'd'},
       {"clamped",     0, NULL, 1004},
       {"oversample",  1, NULL, 1005},
+      {"tileable",    0, NULL, 1006},
+      {"fg-alpha",    1, NULL, 1007},
+      {"bg-alpha",    1, NULL, 1008},
+      {"animate",     1, NULL, 'n'},
       NULL,
     };
-    c = getopt_long(argc, argv, "hi:o:a:b:c:d:x:y:z:r:e:g:s:t:",
+    c = getopt_long(argc, argv, "hi:o:a:b:c:d:x:y:z:r:e:g:s:t:n:",
 		    long_options, &option_index);
     if (c == -1)
       break;
 
     switch (c) {
 
-    case 'i':  load_parameters_from_file(optarg);       break;
-    case 'o':  mode = RENDER; outputFile = optarg;      break;
-    case 'a':  set_parameter("a",              optarg); break;
-    case 'b':  set_parameter("b",              optarg); break;
-    case 'c':  set_parameter("c",              optarg); break;
-    case 'd':  set_parameter("d",              optarg); break;
-    case 'x':  set_parameter("xoffset",        optarg); break;
-    case 'y':  set_parameter("yoffset",        optarg); break;
-    case 'z':  set_parameter("zoom",           optarg); break;
-    case 'r':  set_parameter("rotation",       optarg); break;
-    case 'e':  set_parameter("exposure",       optarg); break;
-    case 'g':  set_parameter("gamma",          optarg); break;
-    case 's':  set_parameter("size" ,          optarg); break;
-    case 't':  set_parameter("target_density", optarg); break;
-    case 1000: set_parameter("blur_radius",    optarg); break;
-    case 1001: set_parameter("blur_ratio",     optarg); break;
-    case 1002: set_parameter("fgcolor",        optarg); break;
-    case 1003: set_parameter("bgcolor",        optarg); break;
-    case 1004: set_parameter("clamped",        "1");    break;
-    case 1005: set_parameter("oversample",     optarg); break;
+    case 'a':  parameter_holder_set(PARAMETER_HOLDER(dejong), "a",              optarg); break;
+    case 'b':  parameter_holder_set(PARAMETER_HOLDER(dejong), "b",              optarg); break;
+    case 'c':  parameter_holder_set(PARAMETER_HOLDER(dejong), "c",              optarg); break;
+    case 'd':  parameter_holder_set(PARAMETER_HOLDER(dejong), "d",              optarg); break;
+    case 'x':  parameter_holder_set(PARAMETER_HOLDER(dejong), "xoffset",        optarg); break;
+    case 'y':  parameter_holder_set(PARAMETER_HOLDER(dejong), "yoffset",        optarg); break;
+    case 'z':  parameter_holder_set(PARAMETER_HOLDER(dejong), "zoom",           optarg); break;
+    case 'r':  parameter_holder_set(PARAMETER_HOLDER(dejong), "rotation",       optarg); break;
+    case 'e':  parameter_holder_set(PARAMETER_HOLDER(dejong), "exposure",       optarg); break;
+    case 'g':  parameter_holder_set(PARAMETER_HOLDER(dejong), "gamma",          optarg); break;
+    case 's':  parameter_holder_set(PARAMETER_HOLDER(dejong), "size" ,          optarg); break;
+    case 1000: parameter_holder_set(PARAMETER_HOLDER(dejong), "blur_radius",    optarg); break;
+    case 1001: parameter_holder_set(PARAMETER_HOLDER(dejong), "blur_ratio",     optarg); break;
+    case 1002: parameter_holder_set(PARAMETER_HOLDER(dejong), "fgcolor",        optarg); break;
+    case 1003: parameter_holder_set(PARAMETER_HOLDER(dejong), "bgcolor",        optarg); break;
+    case 1004: parameter_holder_set(PARAMETER_HOLDER(dejong), "clamped",        "1");    break;
+    case 1005: parameter_holder_set(PARAMETER_HOLDER(dejong), "oversample",     optarg); break;
+    case 1006: parameter_holder_set(PARAMETER_HOLDER(dejong), "tileable",       "1");    break;
+    case 1007: parameter_holder_set(PARAMETER_HOLDER(dejong), "fgalpha",        optarg); break;
+    case 1008: parameter_holder_set(PARAMETER_HOLDER(dejong), "bgalpha",        optarg); break;
+
+    case 'i':
+      histogram_imager_load_image_file(HISTOGRAM_IMAGER(dejong), optarg);
+      break;
+
+    case 'o':
+      mode = RENDER;
+      outputFile = optarg;
+      break;
+
+    case 'n':
+      animation_load_file(animation, optarg);
+      animate = TRUE;
+      break;
+
+    case 't':
+      target_density = atol(optarg);
+      break;
 
     case 'h':
     default:
@@ -103,16 +135,19 @@ int main(int argc, char ** argv) {
     return 1;
   }
 
-  resize(render.width, render.height, render.oversample);
-
   switch (mode) {
 
   case INTERACTIVE:
-    interactive_main(argc, argv);
+    gtk_init(&argc, &argv);
+    explorer_new(dejong, animation);
+    gtk_main();
     break;
 
   case RENDER:
-    render_main(outputFile);
+    if (animate)
+      animation_render_main(dejong, animation, outputFile, target_density);
+    else
+      image_render_main(dejong, outputFile, target_density);
     break;
   }
 
@@ -120,304 +155,135 @@ int main(int argc, char ** argv) {
 }
 
 static void usage(char **argv) {
-  gchar *fg = describe_color(&render.fgcolor);
-  gchar *bg = describe_color(&render.bgcolor);
-
   printf("Usage: %s [options]\n"
 	 "Interactive exploration of the Peter de Jong attractor\n"
 	 "\n"
 	 "Actions:\n"
 	 "  -i, --read FILE       Load all parameters from the tEXt chunk of any\n"
 	 "                          .png image file generated by this program.\n"
+	 "  -n, --animate FILE    Load an animation from FILE. If an output file is\n"
+	 "                          also specified, this renders the animation.\n"
 	 "  -o, --output FILE     Instead of presenting an interactive GUI, render\n"
-	 "                          an image with the provided settings and write it\n"
-	 "                          in PNG format to FILE.\n"
+	 "                          an image or animation with the provided settings\n"
+	 "                          noninteractively, and store it in FILE.\n"
 	 "\n"
 	 "Parameters:\n"
-	 "  -a VALUE              Set the 'a' parameter [%f]\n"
-	 "  -b VALUE              Set the 'b' parameter [%f]\n"
-	 "  -c VALUE              Set the 'c' parameter [%f]\n"
-	 "  -d VALUE              Set the 'd' parameter [%f]\n"
-	 "  -x OFFSET             Set the X offest [%f]\n"
-	 "  -y OFFSET             Set the Y offset [%f]\n"
-	 "  -z, --zoom ZOOM       Set the zoom factor [%f]\n"
-         "  -r, --rotation RADS   Set the rotation, in radians [%f]\n"
-	 "  --blur-radius RADIUS  Set the blur radius [%f]\n"
-	 "  --blur-ratio RATIO    Set the blur ratio [%f]\n"
+	 "  -a VALUE              Set the 'a' parameter\n"
+	 "  -b VALUE              Set the 'b' parameter\n"
+	 "  -c VALUE              Set the 'c' parameter\n"
+	 "  -d VALUE              Set the 'd' parameter\n"
+	 "  -x OFFSET             Set the X offest\n"
+	 "  -y OFFSET             Set the Y offset\n"
+	 "  -z, --zoom ZOOM       Set the zoom factor\n"
+         "  -r, --rotation RADS   Set the rotation, in radians\n"
+	 "  --blur-radius RADIUS  Set the blur radius\n"
+	 "  --blur-ratio RATIO    Set the blur ratio\n"
+	 "  --tileable            Generate a tileable image by wrapping at the edges\n"
 	 "\n"
 	 "Rendering:\n"
-	 "  -e, --exposure EXP    Set the image exposure [%f]\n"
-	 "  -g, --gamma GAMMA     Set the image gamma correction [%f]\n"
+	 "  -e, --exposure EXP    Set the image exposure\n"
+	 "  -g, --gamma GAMMA     Set the image gamma correction\n"
 	 "  --foreground COLOR    Set the foreground color, specified as a color name\n"
-	 "                          or in #RRGGBB hexadecimal format [%s]\n"
+	 "                          or in #RRGGBB hexadecimal format\n"
 	 "  --background COLOR    Set the background color, specified as a color name\n"
-	 "                          or in #RRGGBB hexadecimal format [%s]\n"
+	 "                          or in #RRGGBB hexadecimal format\n"
+	 "  --fg-alpha ALPHA      Set the foreground alpha, between 0 (transparent)\n"
+	 "                          and 65535 (completely opaque)\n"
+	 "  --bg-alpha ALPHA      Set the background alpha, between 0 (transparent)\n"
+	 "                          and 65535 (completely opaque)\n"
 	 "  --clamped             Clamp the image to the foreground color, rather than\n"
 	 "                          allowing more intense pixels to have other values\n"
 	 "\n"
 	 "Quality:\n"
 	 "  -s, --size X[xY]      Set the image size in pixels. If only one value is\n"
-	 "                          given, a square image is produced [%d]\n"
+	 "                          given, a square image is produced\n"
 	 "  --oversample SCALE    Calculate the image at some integer multiple of the\n"
 	 "                          output resolution, downsampling when generating the\n"
-	 "                          final image. This can improve the quality of sharp\n"
-	 "                          edges on some images, but will increase memory usage.\n"
-	 "                          Recommended values are between 1 (no oversampling) and\n"
-	 "                          4 (heavy oversampling) [%d]\n"
+	 "                          final image. This improves the quality of sharp\n"
+	 "                          edges on most images, but will increase memory usage\n"
+	 "                          quadratically. Recommended values are between 1\n"
+	 "                          (no oversampling) and 4 (heavy oversampling)\n"
 	 "  -t, --density DENSITY In noninteractive rendering, set the peak density\n"
 	 "                          to stop rendering at. Larger numbers give smoother\n"
 	 "                          and more detailed results, but increase running time\n"
-	 "                          linearly [%d]\n",
-	 argv[0],
-	 params.a, params.b, params.c, params.d, params.xoffset, params.yoffset, params.zoom,
-	 params.rotation, params.blur_radius, params.blur_ratio,
-	 render.exposure, render.gamma, fg, bg,
-	 render.width, render.oversample, render.target_density);
-
-  g_free(fg);
-  g_free(bg);
+	 "                          linearly\n",
+	 argv[0]);
 }
 
-static void render_main(const char *filename) {
+static void image_render_main (DeJong     *dejong,
+			       const char *filename,
+			       gulong      target_density) {
   /* Main function for noninteractive rendering. This renders an image with the
    * current settings until render.current_density reaches target_density. We show helpful
    * progress doodads on stdout while the poor user has to wait.
    */
-  time_t start_time, now, elapsed, remaining;
-  start_time = time(NULL);
+  float elapsed, remaining;
+  double iterations;
 
-  while (render.current_density < render.target_density) {
-    run_iterations(1000000);
+  while (HISTOGRAM_IMAGER(dejong)->peak_density < target_density) {
+    de_jong_calculate(dejong, 1000000);
 
     /* This should be a fairly accurate time estimate, since (asymptotically at least)
      * current_density increases linearly with the number of iterations performed.
+     * Elapsed time and time remaining are in seconds.
      */
-    now = time(NULL);
-    elapsed = now - start_time;
-    remaining = ((float)elapsed) * render.target_density / render.current_density - elapsed;
+    elapsed = histogram_imager_get_elapsed_time(HISTOGRAM_IMAGER(dejong));
+    remaining = elapsed * target_density / HISTOGRAM_IMAGER(dejong)->peak_density - elapsed;
 
     /* After each batch of iterations, show the percent completion, number
      * of iterations (in scientific notation), iterations per second,
      * density / target density, and elapsed time / remaining time.
      */
-    if (elapsed > 0) {
-      printf("%6.02f%%   %.3e   %.2e/sec   %6d / %d   %02d:%02d:%02d / %02d:%02d:%02d\n",
-	     100.0 * render.current_density / render.target_density,
-	     render.iterations, render.iterations / elapsed,
-	     render.current_density, render.target_density,
-	     elapsed / (60*60), (elapsed / 60) % 60, elapsed % 60,
-	     remaining / (60*60), (remaining / 60) % 60, remaining % 60);
-    }
+    printf("%6.02f%%   %.3e   %.2e/sec   %6d / %d   %02d:%02d:%02d / %02d:%02d:%02d\n",
+	   100.0 * HISTOGRAM_IMAGER(dejong)->peak_density / target_density,
+	   dejong->iterations, dejong->iterations / elapsed,
+	   HISTOGRAM_IMAGER(dejong)->peak_density, target_density,
+	   ((int)elapsed) / (60*60), (((int)elapsed) / 60) % 60, ((int)elapsed)%60,
+	   ((int)remaining) / (60*60), (((int)remaining) / 60) % 60, ((int)remaining)%60);
   }
 
   printf("Creating image...\n");
-  save_to_file(filename);
+  histogram_imager_save_image_file(HISTOGRAM_IMAGER(dejong), filename);
 }
 
-void set_defaults() {
-  params.a = 1.41914;
-  params.b = -2.28413;
-  params.c = 2.42754;
-  params.d = -2.17719;
-  params.zoom = 1;
-  params.xoffset = 0;
-  params.yoffset = 0;
-  params.rotation = 0;
-  params.blur_radius = 0;
-  params.blur_ratio = 1;
+static void animation_render_main (DeJong      *dejong,
+				   Animation   *animation,
+				   const gchar *filename,
+				   gulong      target_density) {
+  const double frame_rate = 24;
+  AnimationIter iter;
+  ParameterHolderPair frame;
+  guint frame_count = 0;
+  gboolean continuation;
+  AviWriter *avi = avi_writer_new(fopen(filename, "wb"),
+				  HISTOGRAM_IMAGER(dejong)->width,
+				  HISTOGRAM_IMAGER(dejong)->height,
+				  frame_rate);
 
-  render.exposure = 0.05;
-  render.gamma = 1;
-  render.clamped = FALSE;
-  gdk_color_parse("white", &render.bgcolor);
-  gdk_color_parse("black", &render.fgcolor);
+  animation_iter_get_first(animation, &iter);
+  frame.a = PARAMETER_HOLDER(de_jong_new());
+  frame.b = PARAMETER_HOLDER(de_jong_new());
 
-  render.width = 600;
-  render.height = 600;
-  render.oversample = 1;
-  render.target_density = 10000;
-}
+  while (animation_iter_read_frame(animation, &iter, &frame, frame_rate)) {
 
-static gchar* describe_color(GdkColor *c) {
-  /* Convert a GdkColor back to a gdk_color_parse compatible hex value.
-   * Returns a freshly allocated buffer that should be freed.
-   */
-  return g_strdup_printf("#%02X%02X%02X", c->red >> 8, c->green >> 8, c->blue >> 8);
-}
+    continuation = FALSE;
+    do {
+      de_jong_calculate_motion(dejong, 100000, continuation,
+			       PARAMETER_INTERPOLATOR(parameter_holder_interpolate_linear),
+			       &frame);
+      printf("Frame %d, %e iterations, %d density\n", frame_count, dejong->iterations, HISTOGRAM_IMAGER(dejong)->peak_density);
+      continuation = TRUE;
+    } while (HISTOGRAM_IMAGER(dejong)->peak_density < target_density);
 
-gchar* save_parameters() {
-  /* Save the current parameters to a freshly allocated human and machine readable string */
-  gchar *fg = describe_color(&render.fgcolor);
-  gchar *bg = describe_color(&render.bgcolor);
-  gchar *result;
 
-  result = g_strdup_printf("a = %f\n"
-			   "b = %f\n"
-			   "c = %f\n"
-			   "d = %f\n"
-			   "zoom = %f\n"
-			   "xoffset = %f\n"
-			   "yoffset = %f\n"
-			   "rotation = %f\n"
-			   "blur_radius = %f\n"
-			   "blur_ratio = %f\n"
-			   "exposure = %f\n"
-			   "gamma = %f\n"
-			   "bgcolor = %s\n"
-			   "fgcolor = %s\n"
-			   "clamped = %d\n",
-			   params.a, params.b, params.c, params.d,
-			   params.zoom, params.xoffset, params.yoffset, params.rotation,
-			   params.blur_radius, params.blur_ratio,
-			   render.exposure, render.gamma,
-			   bg, fg, render.clamped);
+    histogram_imager_update_image(HISTOGRAM_IMAGER(dejong));
+    avi_writer_append_frame(avi, HISTOGRAM_IMAGER(dejong)->image);
 
-  g_free(fg);
-  g_free(bg);
-  return result;
-}
-
-static void set_size_from_string(const char *s) {
-  /* Set the current width and height from a WIDTH or WIDTHxHEIGHT in the given string */
-  char *cptr;
-  render.width = strtol(optarg, &cptr, 10);
-  if (*cptr == 'x')
-    render.height = atoi(cptr+1);
-  else
-    render.height = render.width;
-}
-
-gboolean set_parameter(const char *key, const char *value) {
-  /* Set a single parameter in key-value form, using the same key and value format
-   * as save_parameters(). Returns TRUE if the key wasn't recognized.
-   */
-
-  if (!strcmp(key, "a"))
-    params.a = atof(value);
-
-  else if (!strcmp(key, "b"))
-    params.b = atof(value);
-
-  else if (!strcmp(key, "c"))
-    params.c = atof(value);
-
-  else if (!strcmp(key, "d"))
-    params.d = atof(value);
-
-  else if (!strcmp(key, "zoom"))
-    params.zoom = atof(value);
-
-  else if (!strcmp(key, "xoffset"))
-    params.xoffset = atof(value);
-
-  else if (!strcmp(key, "yoffset"))
-    params.yoffset = atof(value);
-
-  else if (!strcmp(key, "rotation"))
-    params.rotation = atof(value);
-
-  else if (!strcmp(key, "blur_radius"))
-    params.blur_radius = atof(value);
-
-  else if (!strcmp(key, "blur_ratio"))
-    params.blur_ratio = atof(value);
-
-  else if (!strcmp(key, "exposure"))
-    render.exposure = atof(value);
-
-  else if (!strcmp(key, "gamma"))
-    render.gamma = atof(value);
-
-  else if (!strcmp(key, "fgcolor"))
-    gdk_color_parse(value, &render.fgcolor);
-
-  else if (!strcmp(key, "bgcolor"))
-    gdk_color_parse(value, &render.bgcolor);
-
-  else if (!strcmp(key, "size"))
-    set_size_from_string(value);
-
-  else if (!strcmp(key, "target_density"))
-    render.target_density = atol(value);
-
-  else if (!strcmp(key, "clamped"))
-    render.clamped = atol(value) != 0;
-
-  else if (!strcmp(key, "oversample")) {
-    render.oversample = atol(value);
-    if (render.oversample < 1)
-      render.oversample = 1;
+    frame_count++;
   }
 
-  else
-    return TRUE;
-  return FALSE;
+  avi_writer_close(avi);
 }
 
-void load_parameters(const gchar *paramstring) {
-  /* Load all recognized parameters from a string given in the same
-   * format as the one produced by save_parameters()
-   */
-  gchar *copy, *line, *nextline;
-  gchar *key, *value;
-
-  /* Make a copy of the parameters, since we'll be modifying it */
-  copy = g_strdup(paramstring);
-
-  /* Iterate over lines... */
-  line = copy;
-  while (line) {
-    nextline = strchr(line, '\n');
-    if (nextline) {
-      *nextline = '\0';
-      nextline++;
-    }
-
-    /* Separate it into key and value */
-    key = g_malloc(strlen(line)+1);
-    value = g_malloc(strlen(line)+1);
-    if (sscanf(line, " %s = %s", key, value) == 2) {
-      printf("%s = %s", key, value);
-      if (set_parameter(key, value))
-	printf(" (unrecognized)");
-      printf("\n");
-    }
-    g_free(key);
-    line = nextline;
-  }
-  g_free(copy);
-}
-
-void load_parameters_from_file(const char *name) {
-  /* Try to open the given PNG file and load parameters from it */
-  const gchar *params;
-  GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file(name, NULL);
-  params = gdk_pixbuf_get_option(pixbuf, "tEXt::de_jong_params");
-  if (params)
-    load_parameters(params);
-  else
-    printf("No parameters chunk found\n");
-  gdk_pixbuf_unref(pixbuf);
-}
-
-void save_to_file(const char *name) {
-  /* Save the current contents of pixels[] to a .PNG file */
-  GdkPixbuf *pixbuf;
-  gchar *params;
-
-  /* Get a higher quality rendering */
-  update_pixels();
-
-  pixbuf = gdk_pixbuf_new_from_data((guchar*) render.pixels, GDK_COLORSPACE_RGB, TRUE,
-				    8, render.width, render.height, render.width*4, NULL, NULL);
-
-  /* Save our current parameters in a tEXt chunk, using a format that
-   * is both human-readable and easy to load parameters from automatically.
-   */
-  params = save_parameters();
-  gdk_pixbuf_save(pixbuf, name, "png", NULL, "tEXt::de_jong_params", params, NULL);
-  g_free(params);
-  gdk_pixbuf_unref(pixbuf);
-}
 
 /* The End */
