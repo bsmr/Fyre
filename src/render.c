@@ -32,13 +32,14 @@ static float get_pixel_scale();
 static void update_color_table();
 
 
-void resize(int w, int h) {
+void resize(int w, int h, int oversample) {
   render.width = w;
   render.height = h;
+  render.oversample = oversample;
 
   if (render.counts)
     g_free(render.counts);
-  render.counts = g_malloc(sizeof(render.counts[0]) * render.width * render.height);
+  render.counts = g_malloc(sizeof(render.counts[0]) * w * h * oversample * oversample);
 
   if (render.pixels)
     g_free(render.pixels);
@@ -48,7 +49,8 @@ void resize(int w, int h) {
 }
 
 void clear() {
-  memset(render.counts, 0, render.width * render.height * sizeof(int));
+  memset(render.counts, 0, render.width * render.height *
+	 render.oversample * render.oversample * sizeof(int));
   render.current_density = 0;
   render.iterations = 0;
   point.x = uniform_variate();
@@ -89,12 +91,20 @@ static void update_color_table() {
   /* Reallocate the color table if necessary, then regenerate its contents
    * to match the current_density, exposure, gamma, and other rendering parameters.
    * The color tabls is what maps counts[] values to pixels[] values quickly.
+   *
+   * Note that the target_density doesn't include oversampling. Since the
+   * final accumulated count value can range to the current density times
+   * oversample^2, we need that much of a larger array. Yay. We don't however
+   * have to account for this when computing fscale, since it uses the
+   * non-oversampled size in calculating image density.
    */
-  guint required_size = render.current_density + 1;
+  guint oversampled_density = render.current_density * render.oversample * render.oversample;
+  guint required_size = oversampled_density + 1;
   guint count;
   int r, g, b;
   float pixel_scale = get_pixel_scale();
   float luma;
+  double one_over_gamma = 1/render.gamma;
 
   /* Current table too small? */
   if (render.color_table_size < required_size) {
@@ -107,11 +117,15 @@ static void update_color_table() {
   }
 
   /* Generate one color for every currently-possible count value... */
-  for (count=0; count<=render.current_density; count++) {
+  for (count=0; count<=oversampled_density; count++) {
 
     /* Scale and gamma-correct */
     luma = count * pixel_scale;
-    luma = pow(luma, 1/render.gamma);
+    luma = pow(luma, one_over_gamma);
+
+    /* Optionally clamp before interpolating */
+    if (render.clamped && luma > 1)
+      luma = 1;
 
     /* Linearly interpolate between fgcolor and bgcolor */
     r = ((int)(render.bgcolor.red   * (1-luma) + render.fgcolor.red   * luma)) >> 8;
@@ -129,19 +143,51 @@ static void update_color_table() {
 }
 
 void update_pixels() {
-  /* Convert counts[] to colored 8-bit ARGB image data using our color lookup table */
+  /* Convert counts[] to colored 8-bit ARGB image data using our color lookup table,
+   * downsampling by combining all count buckets that represent each of our output pixels.
+   */
   guint32 *pixel_p;
-  guint *count_p;
-  int x, y;
+  guint *count_p, *sample_p;
+  const int oversample = render.oversample;
+  const int sample_stride = (render.width * oversample) - oversample;
+  const int sample_y_stride = (render.width * oversample) * (oversample - 1);
+  int x, y, sample_x, sample_y;
+  guint sample;
 
   update_color_table();
 
   pixel_p = render.pixels;
   count_p = render.counts;
 
-  for (y=render.height; y; y--)
-    for (x=render.width; x; x--)
-      *(pixel_p++) = render.color_table[*(count_p++)];
+  if (oversample > 1) {
+    /* Nice ugly loop that downsamples from counts[] to pixels[] */
+
+    for (y=render.height; y; y--) {
+      for (x=render.width; x; x--) {
+
+	/* For each output pixel, accumulate an oversample^2 region of point counts */
+	sample = 0;
+	sample_p = count_p;
+	for (sample_y=oversample; sample_y; sample_y--) {
+	  for (sample_x=oversample; sample_x; sample_x--) {
+	    sample += *(sample_p++);
+	  }
+	  sample_p += sample_stride;
+	}
+
+	count_p += oversample;
+	*(pixel_p++) = render.color_table[sample];
+      }
+      count_p += sample_y_stride;
+    }
+  }
+  else {
+    /* A much simpler and faster loop to use when oversampling is disabled */
+
+    for (y=render.height; y; y--)
+      for (x=render.width; x; x--)
+	*(pixel_p++) = render.color_table[*(count_p++)];
+  }
 
   render.dirty_flag = FALSE;
 }
@@ -157,30 +203,54 @@ float normal_variate() {
 }
 
 void run_iterations(int count) {
-  double x, y;
+  const int count_width = render.width * render.oversample;
+  const int count_height = render.height * render.oversample;
+  const double xcenter = count_width / 2.0;
+  const double ycenter = count_height / 2.0;
+  const double scale = xcenter / 2.5 * params.zoom;
+  const gboolean rotation_enabled = params.rotation > 0.0001 || params.rotation < -0.0001;
+  const gboolean blur_enabled = params.blur_ratio > 0.0001 && params.blur_radius > 0.00001;
+  const int blur_table_size = 1024; /* Must be a power of two */
+
+  double x, y, sine_rotation, cosine_rotation;
   unsigned int i, ix, iy;
   guint *p;
-
   guint d;
-  const double xcenter = render.width / 2.0;
-  const double ycenter = render.height / 2.0;
-  const double scale = xcenter / 2.5 * params.zoom;
+  int blur_index;
+  float blur_table[blur_table_size];
+
+  /* Precalculate the sine and cosine of the rotation angle, if we'll need it */
+  if (rotation_enabled) {
+    sine_rotation = sin(params.rotation);
+    cosine_rotation = cos(params.rotation);
+  }
+
+  /* Initialize the blur table with a set of precalculated normally distributed
+   * random numbers. Larger blur tables just increase the independence between
+   * blocks of iterations. Since a new blur table is calculated at each run_iterations,
+   * at infinity the image still has the same effect, but each iteration runs much faster.
+   */
+  if (blur_enabled) {
+    for (i=0; i<blur_table_size; i++)
+      blur_table[i] = normal_variate() * params.blur_radius;
+    blur_index = 0;
+  }
 
   for(i=count; i; --i) {
     /* These are the actual Peter de Jong map equations. The new point value
      * gets stored into 'point', then we go on and mess with x and y before plotting.
      */
     x = sin(params.a * point.y) - cos(params.b * point.x);
-    y = sin(params.c * point.x) - cos(params.c * point.y);
+    y = sin(params.c * point.x) - cos(params.d * point.y);
     point.x = x;
     point.y = y;
 
     /* If rotation is enabled, rotate each point around
      * the origin by params.rotation radians.
      */
-    if (params.rotation) {
-      x =  cos(params.rotation)*point.x + sin(params.rotation)*point.y;
-      y = -sin(params.rotation)*point.x + cos(params.rotation)*point.y;
+    if (rotation_enabled) {
+      x =  cosine_rotation * point.x + sine_rotation   * point.y;
+      y = -sine_rotation   * point.x + cosine_rotation * point.y;
     }
 
     /* If blurring is enabled, use blur_ratio to decide how often to perturb
@@ -188,10 +258,12 @@ void run_iterations(int count) {
      * By perturbing the point using a normal variate, we create a true gaussian
      * blur as the number of iterations approaches infinity.
      */
-    if (params.blur_ratio && params.blur_radius) {
+    if (blur_enabled) {
       if (uniform_variate() < params.blur_ratio) {
-	x += normal_variate() * params.blur_radius;
-	y += normal_variate() * params.blur_radius;
+	x += blur_table[blur_index];
+	blur_index = (blur_index+1) & (blur_table_size-1);
+	y += blur_table[blur_index];
+	blur_index = (blur_index+1) & (blur_table_size-1);
       }
     }
 
@@ -202,8 +274,8 @@ void run_iterations(int count) {
     /* Clip to the size of our image. Note that ix and iy are
      * unsigned, so we only have to make one comparison each.
      */
-    if (ix < render.width && iy < render.height) {
-      p = render.counts + ix + render.width * iy;
+    if (ix < count_width && iy < count_height) {
+      p = render.counts + ix + count_width * iy;
       d = *p = *p + 1;
       if (d > render.current_density)
 	render.current_density = d;

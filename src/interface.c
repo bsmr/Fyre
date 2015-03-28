@@ -252,6 +252,7 @@ static void read_gui_params() {
   params.blur_ratio = gtk_spin_button_get_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_blur_ratio")));
   render.exposure = gtk_spin_button_get_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_exposure")));
   render.gamma = gtk_spin_button_get_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_gamma")));
+  render.clamped = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(glade_xml_get_widget(gui.xml, "param_clamped")));
   color_button_get_color(COLOR_BUTTON(glade_xml_get_widget(gui.xml, "param_fgcolor")), &render.fgcolor);
   color_button_get_color(COLOR_BUTTON(glade_xml_get_widget(gui.xml, "param_bgcolor")), &render.bgcolor);
 }
@@ -270,6 +271,7 @@ static void write_gui_params() {
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_blur_ratio")), params.blur_ratio);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_exposure")), render.exposure);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "param_gamma")), render.gamma);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(glade_xml_get_widget(gui.xml, "param_clamped")), render.clamped);
   color_button_set_color(COLOR_BUTTON(glade_xml_get_widget(gui.xml, "param_fgcolor")), &render.fgcolor);
   color_button_set_color(COLOR_BUTTON(glade_xml_get_widget(gui.xml, "param_bgcolor")), &render.bgcolor);
   gui.writing_params = FALSE;
@@ -342,7 +344,7 @@ void on_randomize(GtkWidget *widget, gpointer user_data) {
 
 void on_load_defaults(GtkWidget *widget, gpointer user_data) {
   set_defaults();
-  resize(render.width, render.height);
+  resize(render.width, render.height, render.oversample);
   gui_resize(render.width, render.height);
   write_gui_params();
   restart_rendering();
@@ -358,6 +360,7 @@ void on_pause_rendering_toggle(GtkWidget *widget, gpointer user_data) {
 void on_resize(GtkWidget *widget, gpointer user_data) {
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_width")), render.width);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_height")), render.height);
+  gtk_spin_button_set_value(GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_oversample")), render.oversample);
 
   gtk_widget_grab_focus(glade_xml_get_widget(gui.xml, "resize_width"));
   gtk_widget_show(glade_xml_get_widget(gui.xml, "resize_window"));
@@ -368,20 +371,23 @@ void on_resize_cancel(GtkWidget *widget, gpointer user_data) {
 }
 
 void on_resize_ok(GtkWidget *widget, gpointer user_data) {
-  int new_width, new_height;
-  GtkSpinButton *width_widget, *height_widget;
+  int new_width, new_height, new_oversample;
+  GtkSpinButton *width_widget, *height_widget, *oversample_widget;
 
-  width_widget  = GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_width"));
+  width_widget = GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_width"));
   height_widget = GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_height"));
+  oversample_widget = GTK_SPIN_BUTTON(glade_xml_get_widget(gui.xml, "resize_oversample"));
 
   gtk_spin_button_update(width_widget);
   gtk_spin_button_update(height_widget);
+  gtk_spin_button_update(oversample_widget);
 
   new_width = gtk_spin_button_get_value(width_widget);
   new_height = gtk_spin_button_get_value(height_widget);
+  new_oversample = gtk_spin_button_get_value(oversample_widget);
   gtk_widget_hide(glade_xml_get_widget(gui.xml, "resize_window"));
 
-  resize(new_width, new_height);
+  resize(new_width, new_height, new_oversample);
   gui_resize(new_width, new_height);
 }
 
@@ -402,11 +408,10 @@ void on_load_from_image(GtkWidget *widget, gpointer user_data) {
     const gchar *filename;
     filename = gtk_file_selection_get_filename(GTK_FILE_SELECTION(dialog));
     load_parameters_from_file(filename);
+    write_gui_params();
+    restart_rendering();
   }
   gtk_widget_destroy(dialog);
-
-  write_gui_params();
-  restart_rendering();
 }
 
 void on_save(GtkWidget *widget, gpointer user_data) {
