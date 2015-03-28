@@ -88,6 +88,12 @@ void explorer_init_animation(Explorer *self) {
 
     explorer_update_animation_length(self);
     explorer_init_keyframe_view(self);
+
+    /* If we started out with an animation (e.g. from the command line)
+     * go ahead and show the animation window.
+     */
+    if (animation_get_length(self->animation) > 0)
+	gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(glade_xml_get_widget(self->xml, "toggle_animation_window")), TRUE);
 }
 
 void explorer_dispose_animation(Explorer *self) {
@@ -382,6 +388,7 @@ static void explorer_update_animation_length(Explorer *self) {
     /* Recalculate the length of the animation and update the anim_scale accordingly
      */
     GtkWidget *scale = glade_xml_get_widget(self->xml, "anim_scale");
+    GtkWidget *render_menu = glade_xml_get_widget(self->xml, "anim_render");
     gdouble length = animation_get_length(self->animation);
     gboolean enable = length > 0.0001;
 
@@ -393,6 +400,7 @@ static void explorer_update_animation_length(Explorer *self) {
 			     GTK_ADJUSTMENT(gtk_adjustment_new(gtk_range_get_value(GTK_RANGE(scale)), 0, length, 0.01, 1, 0)));
     gtk_widget_set_sensitive(scale, enable);
     gtk_widget_set_sensitive(glade_xml_get_widget(self->xml, "anim_play_button"), enable);
+    gtk_widget_set_sensitive(GTK_WIDGET(render_menu), enable);
 }
 
 static void on_anim_scale_changed(GtkWidget *widget, gpointer user_data) {
@@ -562,8 +570,6 @@ static void on_anim_save_as (GtkWidget *widget, gpointer user_data) {
 					  GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
 					  GTK_STOCK_OK, GTK_RESPONSE_OK,
 					  NULL);
-    gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog), "animation.fa");
-
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
         gchar *filename;
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));

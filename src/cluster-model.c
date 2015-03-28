@@ -26,6 +26,7 @@
 #include "config.h"
 #include "cluster-model.h"
 #include <stdlib.h>
+#include <string.h>
 
 typedef void      (*ClusterForeachCallback)   (ClusterModel*         self,
 					       RemoteClient*         client,
@@ -72,6 +73,10 @@ static void       cluster_node_merge_results  (ClusterModel  *self,
 static void       cluster_node_set_min_stream_interval (ClusterModel  *self,
 							RemoteClient  *client,
 							gpointer       user_data);
+static void       cluster_model_discovery_callback     (DiscoveryClient* self,
+							const gchar*     host,
+							int              port,
+							gpointer         user_data);
 
 
 /************************************************************************************/
@@ -112,6 +117,8 @@ static void cluster_model_class_init(ClusterModelClass *klass)
 static void cluster_model_dispose(GObject *gobject)
 {
     ClusterModel *self = CLUSTER_MODEL(gobject);
+
+    cluster_model_disable_discovery(self);
 
     if (self->master_map) {
 	g_object_set_data(G_OBJECT(self->master_map), "ClusterModel", NULL);
@@ -249,6 +256,34 @@ gboolean       cluster_model_find_client      (ClusterModel*         self,
     return FALSE;
 }
 
+gboolean       cluster_model_find_address     (ClusterModel*         self,
+					       const gchar*          hostname,
+					       gint                  port,
+					       GtkTreeIter*          iter)
+{
+    const gchar* iter_host;
+    gint iter_port;
+
+    if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(self), iter)) {
+	do {
+	    gtk_tree_model_get(GTK_TREE_MODEL(self), iter,
+			       CLUSTER_MODEL_HOSTNAME, &iter_host,
+			       CLUSTER_MODEL_PORT, &iter_port,
+			       -1);
+
+	    /* FIXME: strcmp isn't good enough, we should really be checking
+	     *        whether the hostnames refer to the same internet
+	     *        address.
+	     */
+	    if (port == iter_port && !strcmp(iter_host, hostname))
+		return TRUE;
+
+	} while (gtk_tree_model_iter_next(GTK_TREE_MODEL(self), iter));
+    }
+
+    return FALSE;
+}
+
 void           cluster_model_remove_node      (ClusterModel*         self,
 					       GtkTreeIter*          iter)
 {
@@ -355,6 +390,23 @@ void           cluster_model_set_min_stream_interval (ClusterModel*  self,
     cluster_foreach_node(self, cluster_node_set_min_stream_interval, NULL, FALSE);
 }
 
+void           cluster_model_enable_discovery (ClusterModel* self)
+{
+    /* Currently, our scanning interval is hardcoded at 5 minutes */
+    if (!self->discovery)
+	self->discovery = discovery_client_new(FYRE_DEFAULT_SERVICE, 5*60,
+					       cluster_model_discovery_callback,
+					       self);
+}
+
+void           cluster_model_disable_discovery(ClusterModel* self)
+{
+    if (self->discovery) {
+	g_object_unref(self->discovery);
+	self->discovery = NULL;
+    }
+}
+
 
 /************************************************************************************/
 /************************************************************************ Callbacks */
@@ -430,6 +482,28 @@ static void       on_calc_stop                (IterativeMap*  map,
 {
     self->is_running = FALSE;
     cluster_foreach_node(self, cluster_node_stop, NULL, TRUE);
+}
+
+static void       cluster_model_discovery_callback (DiscoveryClient* client,
+						    const gchar*     host,
+						    int              port,
+						    gpointer         user_data)
+{
+    /* This is called by our DiscoveryClient when it's found a cluster
+     * node. We may or may not already have this node- if we don't,
+     * it gets added.
+     */
+    GtkTreeIter iter;
+    ClusterModel* self = CLUSTER_MODEL(user_data);
+    g_return_if_fail(client == self->discovery);
+
+    if (cluster_model_find_address(self, host, port, &iter)) {
+	/* Already found this host */
+	return;
+    }
+
+    /* Yay, a new node */
+    cluster_model_add_node(self, host, port);
 }
 
 

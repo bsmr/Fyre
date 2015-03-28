@@ -51,7 +51,6 @@ struct _ScreenSaver {
     int num_frames, current_frame;
     int direction;
 
-    GtkWidget *window;
     GtkWidget *view;
 
     guint idler;
@@ -66,8 +65,10 @@ struct _ScreenSaverClass {
 /******************************************************************* Public Methods */
 /************************************************************************************/
 
-GType         screensaver_get_type();
-ScreenSaver*  screensaver_new(IterativeMap *map, Animation *animation);
+GType         screensaver_get_type ();
+ScreenSaver*  screensaver_new      (IterativeMap *map, Animation *animation);
+void          screensaver_start    (ScreenSaver *self);
+void          screensaver_stop     (ScreenSaver *self);
 
 G_END_DECLS
 

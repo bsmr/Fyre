@@ -23,6 +23,7 @@
  */
 
 #include "animation-render-ui.h"
+#include "gui-util.h"
 #include "prefix.h"
 
 static void animation_render_ui_class_init(AnimationRenderUiClass *klass);
@@ -98,6 +99,8 @@ static void animation_render_ui_init(AnimationRenderUi *self) {
 	self->xml = glade_xml_new(BR_DATADIR("/fyre/animation-render.glade"), NULL, NULL);
 #endif
 
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "window"));
+
     glade_xml_signal_connect_data(self->xml, "on_ok_clicked",                 G_CALLBACK(on_ok_clicked),                 self);
     glade_xml_signal_connect_data(self->xml, "on_cancel_clicked",             G_CALLBACK(on_cancel_clicked),             self);
     glade_xml_signal_connect_data(self->xml, "on_select_output_file_clicked", G_CALLBACK(on_select_output_file_clicked), self);
@@ -164,9 +167,19 @@ static void on_ok_clicked(GtkWidget *widget, AnimationRenderUi *self) {
 }
 
 static void on_cancel_clicked(GtkWidget *widget, AnimationRenderUi *self) {
-    if (self->render_in_progress)
+    if(self->render_in_progress) {
+	if(self->confirm_on) {
+	    gint result;
+	    GtkWidget *dialog;
+
+            dialog = glade_xml_get_widget(self->xml, "confirm_cancel");
+	    result = gtk_dialog_run (GTK_DIALOG(dialog));
+	    gtk_widget_hide (dialog);
+	    if(result == GTK_RESPONSE_REJECT)
+		return;
+	}
 	animation_render_ui_stop(self);
-    else {
+    } else {
 	gtk_widget_destroy(glade_xml_get_widget(self->xml, "window"));
 	g_signal_emit(G_OBJECT(self), animation_render_ui_signals[CLOSED_SIGNAL], 0);
     }
@@ -182,8 +195,6 @@ static void on_select_output_file_clicked(GtkWidget *widget, AnimationRenderUi *
 					  GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
 					  GTK_STOCK_OK, GTK_RESPONSE_OK,
 					  NULL);
-    gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog),
-		                   gtk_entry_get_text (GTK_ENTRY (glade_xml_get_widget (self->xml, "output_fille"))));
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
 	    gchar *filename;
 	    filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));
@@ -199,8 +210,8 @@ static void on_select_output_file_clicked(GtkWidget *widget, AnimationRenderUi *
 	gtk_entry_set_text (GTK_ENTRY (glade_xml_get_widget (self->xml, "output_file")),
 			    gtk_file_selection_get_filename (GTK_FILE_SELECTION (dialog)));
     }
-    gtk_widget_destroy (dialog);
 #endif
+    gtk_widget_destroy (dialog);
 }
 
 static gboolean on_delete_event(GtkWidget *widget, GdkEvent *event, AnimationRenderUi *self) {
@@ -215,7 +226,14 @@ static gboolean on_delete_event(GtkWidget *widget, GdkEvent *event, AnimationRen
 /************************************************************************ Rendering */
 /************************************************************************************/
 
+static gboolean set_confirm_on(AnimationRenderUi *self) {
+	self->confirm_on = TRUE;
+	return FALSE;
+}
+
 static void animation_render_ui_start(AnimationRenderUi *self) {
+    GtkWidget *close;
+
     g_object_set(self->map,
 		 "width", self->width,
 		 "height", self->height,
@@ -223,6 +241,9 @@ static void animation_render_ui_start(AnimationRenderUi *self) {
 		 NULL);
 
     self->avi = avi_writer_new(fopen(self->filename, "wb"), self->width, self->height, self->frame_rate);
+
+    close = glade_xml_get_widget(self->xml, "cancel");
+    gtk_button_set_label(GTK_BUTTON(close), GTK_STOCK_CANCEL);
 
     /* Get the first frame ready for rendering */
     animation_iter_get_first(self->animation, &self->iter);
@@ -237,11 +258,22 @@ static void animation_render_ui_start(AnimationRenderUi *self) {
     /* Set up an idle handler where we'll do the rendering in small chunks */
     self->idler = g_idle_add(animation_render_ui_idle_handler, self);
 
+    /* Set up a timeout so we only ask for confirmation on cancel after 15s */
+    self->confirm_on = FALSE;
+    g_timeout_add(15000, (GSourceFunc) set_confirm_on, self);
+
     self->render_in_progress = TRUE;
 }
 
 static void animation_render_ui_stop(AnimationRenderUi *self) {
+    GtkWidget *close;
+
     self->render_in_progress = FALSE;
+
+    self->confirm_on = FALSE;
+
+    close = glade_xml_get_widget(self->xml, "cancel");
+    gtk_button_set_label(GTK_BUTTON(close), GTK_STOCK_CLOSE);
 
     avi_writer_close(self->avi);
     g_object_unref(self->avi);

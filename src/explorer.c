@@ -27,7 +27,9 @@
 #include "explorer.h"
 #include "parameter-editor.h"
 #include "math-util.h"
+#include "gui-util.h"
 #include "histogram-view.h"
+#include "de-jong.h"
 #include "prefix.h"
 
 static void explorer_class_init  (ExplorerClass *klass);
@@ -39,24 +41,27 @@ static gboolean limit_update_rate               (GTimer* timer, float max_rate);
 static gdouble  explorer_get_iter_speed         (Explorer *self);
 static gchar*   explorer_strdup_status          (Explorer *self);
 static gchar*   explorer_strdup_speed           (Explorer *self);
+static void     explorer_update_status_bar      (Explorer *self);
 
 static gdouble generate_random_param();
 
-static void on_randomize(GtkWidget *widget, gpointer user_data);
-static void on_load_defaults(GtkWidget *widget, gpointer user_data);
-static void on_save(GtkWidget *widget, gpointer user_data);
-static void on_save_exr(GtkWidget *widget, gpointer user_data);
-static void on_quit(GtkWidget *widget, gpointer user_data);
-static void on_pause_rendering_toggle(GtkWidget *widget, gpointer user_data);
-static void on_load_from_image(GtkWidget *widget, gpointer user_data);
-static void on_widget_toggle(GtkWidget *widget, gpointer user_data);
-static void on_render_time_changed(GtkWidget *widget, gpointer user_data);
-static void on_calculation_finished(IterativeMap *map, gpointer user_data);
-static gboolean on_interactive_prefs_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data);
-static gboolean on_cluster_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data);
-static void on_about_activate(GtkWidget *widget, Explorer *self);
+static void     on_randomize                (GtkWidget *widget, Explorer* self);
+static void     on_load_defaults            (GtkWidget *widget, Explorer* self);
+static void     on_save                     (GtkWidget *widget, Explorer* self);
+static void     on_save_exr                 (GtkWidget *widget, Explorer* self);
+static void     on_quit                     (GtkWidget *widget, Explorer* self);
+static void     on_pause_rendering_toggle   (GtkWidget *widget, Explorer* self);
+static void     on_load_from_image          (GtkWidget *widget, Explorer* self);
+static void     on_widget_toggle            (GtkWidget *widget, Explorer* self);
+static void     on_zoom_reset               (GtkWidget *widget, Explorer* self);
+static void     on_zoom_in                  (GtkWidget *widget, Explorer* self);
+static void     on_zoom_out                 (GtkWidget *widget, Explorer* self);
+static void     on_render_time_changed      (GtkWidget *widget, Explorer* self);
+static void     on_calculation_finished     (IterativeMap *map, Explorer* self);
+static gboolean on_interactive_prefs_delete (GtkWidget *widget, GdkEvent *event, Explorer* self);
 
 static gchar *file_location = NULL;
+
 
 /************************************************************************************/
 /**************************************************** Initialization / Finalization */
@@ -93,13 +98,23 @@ static void explorer_class_init(ExplorerClass *klass) {
 }
 
 static void explorer_init(Explorer *self) {
+
     if (g_file_test (FYRE_DATADIR "/explorer.glade", G_FILE_TEST_EXISTS))
         self->xml = glade_xml_new (FYRE_DATADIR "/explorer.glade", NULL, NULL);
 #ifdef ENABLE_BINRELOC
     if (!self->xml)
 	self->xml = glade_xml_new(BR_DATADIR("/fyre/explorer.glade"), NULL, NULL);
 #endif
+
+    self->paused = FALSE;
+
     self->window = glade_xml_get_widget(self->xml, "explorer_window");
+    fyre_set_icon_later(self->window);
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "animation_window"));
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "interactive_prefs"));
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "cluster_window"));
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "about_window"));
+    fyre_set_icon_later(glade_xml_get_widget(self->xml, "error dialog"));
 
     /* Connect signal handlers */
     glade_xml_signal_connect_data(self->xml, "on_randomize",                    G_CALLBACK(on_randomize),                    self);
@@ -110,10 +125,11 @@ static void explorer_init(Explorer *self) {
     glade_xml_signal_connect_data(self->xml, "on_pause_rendering_toggle",       G_CALLBACK(on_pause_rendering_toggle),       self);
     glade_xml_signal_connect_data(self->xml, "on_load_from_image",              G_CALLBACK(on_load_from_image),              self);
     glade_xml_signal_connect_data(self->xml, "on_widget_toggle",                G_CALLBACK(on_widget_toggle),                self);
+    glade_xml_signal_connect_data(self->xml, "on_zoom_reset",                   G_CALLBACK(on_zoom_reset),                   self);
+    glade_xml_signal_connect_data(self->xml, "on_zoom_in",                      G_CALLBACK(on_zoom_in),                      self);
+    glade_xml_signal_connect_data(self->xml, "on_zoom_out",                     G_CALLBACK(on_zoom_out),                     self);
     glade_xml_signal_connect_data(self->xml, "on_render_time_changed",          G_CALLBACK(on_render_time_changed),          self);
     glade_xml_signal_connect_data(self->xml, "on_interactive_prefs_delete",     G_CALLBACK(on_interactive_prefs_delete),     self);
-    glade_xml_signal_connect_data(self->xml, "on_cluster_window_delete",        G_CALLBACK(on_cluster_window_delete),        self);
-    glade_xml_signal_connect_data(self->xml, "on_about_activate",               G_CALLBACK(on_about_activate),               self);
 
 #ifndef HAVE_EXR
     /* If we don't have OpenEXR support, gray out the menu item
@@ -126,7 +142,8 @@ static void explorer_init(Explorer *self) {
     self->statusbar = GTK_STATUSBAR(glade_xml_get_widget(self->xml, "statusbar"));
     self->render_status_context = gtk_statusbar_get_context_id(self->statusbar, "Rendering status");
     self->speed_timer = g_timer_new();
-    self->update_rate_timer = g_timer_new();
+    self->auto_update_rate_timer = g_timer_new();
+    self->status_update_rate_timer = g_timer_new();
 }
 
 static void explorer_dispose(GObject *gobject) {
@@ -140,9 +157,13 @@ static void explorer_dispose(GObject *gobject) {
 	self->speed_timer = NULL;
     }
 
-    if (self->update_rate_timer) {
-	g_timer_destroy(self->update_rate_timer);
-	self->update_rate_timer = NULL;
+    if (self->auto_update_rate_timer) {
+	g_timer_destroy(self->auto_update_rate_timer);
+	self->auto_update_rate_timer = NULL;
+    }
+    if (self->status_update_rate_timer) {
+	g_timer_destroy(self->status_update_rate_timer);
+	self->status_update_rate_timer = NULL;
     }
 
     if (self->map) {
@@ -176,6 +197,7 @@ Explorer* explorer_new(IterativeMap *map, Animation *animation) {
     explorer_init_animation(self);
     explorer_init_tools(self);
     explorer_init_cluster(self);
+    explorer_init_about(self);
 
     /* Start the iterative map rendering in the background, and get a callback every time a block
      * of calculations finish so we can update the GUI.
@@ -227,9 +249,7 @@ static gdouble generate_random_param() {
     return uniform_variate() * 12 - 6;
 }
 
-static void on_randomize(GtkWidget *widget, gpointer user_data) {
-    Explorer *self = EXPLORER(user_data);
-
+static void on_randomize(GtkWidget *widget, Explorer* self) {
     g_object_set(self->map,
 		 "a", generate_random_param(),
 		 "b", generate_random_param(),
@@ -238,8 +258,7 @@ static void on_randomize(GtkWidget *widget, gpointer user_data) {
 		 NULL);
 }
 
-static void on_load_defaults(GtkWidget *widget, gpointer user_data) {
-    Explorer *self = EXPLORER(user_data);
+static void on_load_defaults(GtkWidget *widget, Explorer* self) {
     parameter_holder_reset_to_defaults(PARAMETER_HOLDER(self->map));
 }
 
@@ -248,15 +267,16 @@ static void on_load_defaults(GtkWidget *widget, gpointer user_data) {
 /******************************************************************** Misc GUI goop */
 /************************************************************************************/
 
-static void on_quit(GtkWidget *widget, gpointer user_data) {
+static void on_quit(GtkWidget *widget, Explorer* self)
+{
     gtk_main_quit();
 }
 
-static void on_widget_toggle(GtkWidget *widget, gpointer user_data) {
+static void on_widget_toggle(GtkWidget *widget, Explorer* self)
+{
     /* Toggle visibility of another widget. This widget should be named
      * toggle_foo to control the visibility of a widget named foo.
      */
-    Explorer *self = EXPLORER(user_data);
     const gchar *name;
     GtkWidget *toggled;
 
@@ -268,6 +288,25 @@ static void on_widget_toggle(GtkWidget *widget, gpointer user_data) {
 	gtk_widget_show(toggled);
     else
 	gtk_widget_hide(toggled);
+}
+
+static void on_zoom_reset(GtkWidget *widget, Explorer* self)
+{
+    g_object_set(self->map, "zoom", 1.0, NULL);
+}
+
+static void on_zoom_in(GtkWidget *widget, Explorer* self)
+{
+    g_object_set(self->map,
+		 "zoom", DE_JONG(self->map)->zoom + 2.0,
+		 NULL);
+}
+
+static void on_zoom_out(GtkWidget *widget, Explorer* self)
+{
+    g_object_set(self->map,
+		 "zoom", DE_JONG(self->map)->zoom - 2.0,
+		 NULL);
 }
 
 #if (GTK_CHECK_VERSION(2, 4, 0))
@@ -283,7 +322,7 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
 	emblem_pixbuf = gdk_pixbuf_new_from_file (FYRE_DATADIR "/metadata-emblem.png", NULL);
 #ifdef ENABLE_BINRELOC
 	if (!emblem_pixbuf)
-	    emblem_pixbuf = gdk_pixbuf_new_from_file (BR_DATADIR ("/metadata-emblem.png"), NULL);
+	    emblem_pixbuf = gdk_pixbuf_new_from_file (BR_DATADIR ("/fyre/metadata-emblem.png"), NULL);
 #endif
     }
 
@@ -323,8 +362,7 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
 }
 #endif
 
-static void on_load_from_image (GtkWidget *widget, gpointer user_data) {
-    Explorer *self = EXPLORER (user_data);
+static void on_load_from_image (GtkWidget *widget, Explorer* self) {
     GtkWidget *dialog, *image;
     GError *error = NULL;
     gchar *filename = NULL;
@@ -379,8 +417,7 @@ static void on_load_from_image (GtkWidget *widget, gpointer user_data) {
     g_free (filename);
 }
 
-static void on_save (GtkWidget *widget, gpointer user_data) {
-    Explorer *self = EXPLORER (user_data);
+static void on_save (GtkWidget *widget, Explorer* self) {
     GtkWidget *dialog;
     GError *error = NULL;
     gchar *filename = NULL;
@@ -393,7 +430,6 @@ static void on_save (GtkWidget *widget, gpointer user_data) {
 					  GTK_STOCK_SAVE, GTK_RESPONSE_OK,
 					  NULL);
     gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
-    gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog), "rendering.png");
     if (file_location != NULL)
         gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), file_location);
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
@@ -435,9 +471,8 @@ static void on_save (GtkWidget *widget, gpointer user_data) {
 	g_free (filename);
 }
 
-static void on_save_exr (GtkWidget *widget, gpointer user_data) {
+static void on_save_exr (GtkWidget *widget, Explorer* self) {
 #ifdef HAVE_EXR
-    Explorer *self = EXPLORER (user_data);
     GtkWidget *dialog;
     GError *error = NULL;
     gchar *filename = NULL;
@@ -452,7 +487,6 @@ static void on_save_exr (GtkWidget *widget, gpointer user_data) {
     gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
     if (file_location != NULL)
         gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), file_location);
-    gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog), "rendering.exr");
 
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));
@@ -495,23 +529,14 @@ static void on_save_exr (GtkWidget *widget, gpointer user_data) {
 #endif /* HAVE_EXR */
 }
 
-static void on_render_time_changed(GtkWidget *widget, gpointer user_data) {
+static void on_render_time_changed(GtkWidget *widget, Explorer* self) {
     double v = gtk_range_get_adjustment(GTK_RANGE(widget))->value;
-    Explorer *self = EXPLORER(user_data);
     self->map->render_time = v / 1000.0;  /* Milliseconds to seconds */
 }
 
-static gboolean on_interactive_prefs_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
+static gboolean on_interactive_prefs_delete(GtkWidget *widget, GdkEvent *event, Explorer* self) {
     /* Just hide the window when the user tries to close it */
-    Explorer *self = EXPLORER(user_data);
     gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(glade_xml_get_widget(self->xml, "toggle_interactive_prefs")), FALSE);
-    return TRUE;
-}
-
-static gboolean on_cluster_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
-    /* Just hide the window when the user tries to close it */
-    Explorer *self = EXPLORER(user_data);
-    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(glade_xml_get_widget(self->xml, "toggle_cluster_window")), FALSE);
     return TRUE;
 }
 
@@ -520,9 +545,9 @@ static gboolean on_cluster_window_delete(GtkWidget *widget, GdkEvent *event, gpo
 /************************************************************************ Rendering */
 /************************************************************************************/
 
-static void on_pause_rendering_toggle(GtkWidget *widget, gpointer user_data) {
-    Explorer *self = EXPLORER(user_data);
-    if (gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(widget)))
+static void on_pause_rendering_toggle(GtkWidget *widget, Explorer* self) {
+    self->paused = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(widget));
+    if (self->paused)
 	iterative_map_stop_calculation(self->map);
     else
 	iterative_map_start_calculation(self->map);
@@ -532,9 +557,8 @@ static void on_pause_rendering_toggle(GtkWidget *widget, gpointer user_data) {
     explorer_update_gui(self);
 }
 
-static void on_calculation_finished(IterativeMap *map, gpointer user_data)
+static void on_calculation_finished(IterativeMap *map, Explorer* self)
 {
-    Explorer *self = EXPLORER(user_data);
     explorer_update_gui(self);
     explorer_update_animation(self);
     explorer_update_tools(self);
@@ -592,7 +616,7 @@ static gboolean explorer_auto_limit_update_rate(Explorer *self) {
     else
 	rate = 1.0 / pow(pow_initial_period + pow_period_scale * elapsed, one_over_gamma);
 
-    return limit_update_rate(self->update_rate_timer, rate);
+    return limit_update_rate(self->auto_update_rate_timer, rate);
 }
 
 void explorer_update_gui(Explorer *self) {
@@ -601,23 +625,52 @@ void explorer_update_gui(Explorer *self) {
      * frames to the drawing area.
      */
 
-    /* Skip frame rate limiting if we have parameter or status changes to show quickly */
-    if (!(HISTOGRAM_IMAGER(self->map)->render_dirty_flag || self->status_dirty_flag)) {
-	if (explorer_auto_limit_update_rate(self))
-	    return;
+    /* If we have rendering changes we're trying to push through as quickly
+     * as possible, don't bother with the status bar or with frame rate limiting.
+     */
+    if (HISTOGRAM_IMAGER(self->map)->render_dirty_flag) {
+	histogram_view_update(HISTOGRAM_VIEW(self->view));
+	return;
     }
 
-    /* We don't want to update the status bar if we're trying to show rendering changes quickly */
-    if (!HISTOGRAM_IMAGER(self->map)->render_dirty_flag) {
-	gchar *status = explorer_strdup_status(self);
-	if (self->render_status_message_id)
-	    gtk_statusbar_remove(self->statusbar, self->render_status_context, self->render_status_message_id);
-	self->render_status_message_id = gtk_statusbar_push(self->statusbar, self->render_status_context, status);
-	g_free(status);
-	self->status_dirty_flag = FALSE;
+    /* If we have an important status change to report, update both
+     * the status bar and the view without frame rate limiting.
+     */
+    if (self->status_dirty_flag) {
+	explorer_update_status_bar(self);
+	histogram_view_update(HISTOGRAM_VIEW(self->view));
+	return;
     }
 
-    histogram_view_update(HISTOGRAM_VIEW(self->view));
+    /* Update the status bar at a fixed rate. This will give the user
+     * the impression that things are moving along steadily even when
+     * we're actually updating the view very slowly later in the render.
+     */
+    if (!limit_update_rate(self->status_update_rate_timer, 2.0 )) {
+	explorer_update_status_bar(self);
+    }
+
+    /* Use our funky automatic frame rate adjuster to time normal view updates.
+     * This will slow down updates nonlinearly as rendering progresses,
+     * to give good interactive response while making batch rendering
+     * still fairly efficient.
+     */
+    if (!explorer_auto_limit_update_rate(self)) {
+	histogram_view_update(HISTOGRAM_VIEW(self->view));
+    }
+}
+
+static void explorer_update_status_bar(Explorer *self)
+{
+    gchar *status = explorer_strdup_status(self);
+
+    if (self->render_status_message_id)
+	gtk_statusbar_remove(self->statusbar, self->render_status_context, self->render_status_message_id);
+
+    self->render_status_message_id = gtk_statusbar_push(self->statusbar, self->render_status_context, status);
+    g_free(status);
+
+    self->status_dirty_flag = FALSE;
 }
 
 static gchar*   explorer_strdup_status (Explorer *self)
@@ -662,55 +715,6 @@ static gdouble  explorer_get_iter_speed(Explorer *self)
 	self->iter_speed = iter_diff / elapsed;
     }
     return self->iter_speed;
-}
-
-/************************************************************************************/
-/********************************************************************* About Dialog */
-/************************************************************************************/
-
-static void on_about_close(GtkWidget *widget, Explorer *self)
-{
-    GtkWidget *dialog;
-    dialog = glade_xml_get_widget(self->xml, "about_window");
-    gtk_widget_hide(dialog);
-}
-
-static void on_about_activate(GtkWidget *widget, Explorer *self)
-{
-    GtkWidget *dialog;
-
-    dialog = glade_xml_get_widget (self->xml, "about_window");
-
-    if (!self->about_box_initialized) {
-        GtkWidget *close, *image, *label;
-	GdkPixbuf *pixbuf;
-	gchar *text;
-
-        close = glade_xml_get_widget(self->xml, "about close");
-	image = glade_xml_get_widget(self->xml, "about image");
-	label = glade_xml_get_widget(self->xml, "about version");
-
-	pixbuf = gdk_pixbuf_new_from_file(FYRE_DATADIR "/wicker-shoelace.png", NULL);
-#ifdef ENABLE_BINRELOC
-	if (!pixbuf)
-	    pixbuf = gdk_pixbuf_new_from_file(BR_DATADIR("/fyre/wicker-shoelace.png"), NULL);
-#endif
-	if (pixbuf) {
-	    gtk_image_set_from_pixbuf(GTK_IMAGE (image), pixbuf);
-	    gdk_pixbuf_unref(pixbuf);
-	}
-
-	g_signal_connect(G_OBJECT (dialog), "delete-event", G_CALLBACK(on_about_close), self);
-	g_signal_connect(G_OBJECT (close), "clicked", G_CALLBACK(on_about_close), self);
-
-	text = g_strdup_printf("<span size=\"xx-large\" weight=\"bold\">Fyre %s</span>", VERSION);
-	gtk_label_set_markup(GTK_LABEL(label), text);
-	g_free(text);
-
-	self->about_box_initialized = TRUE;
-    }
-
-    gtk_widget_show_all(dialog);
 }
 
 /* The End */

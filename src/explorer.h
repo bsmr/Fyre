@@ -29,6 +29,7 @@
 #include <glade/glade.h>
 #include "animation.h"
 #include "animation-render-ui.h"
+#include "screensaver.h"
 
 #ifdef HAVE_GNET
 #include "cluster-model.h"
@@ -58,14 +59,15 @@ struct _Explorer {
     GtkWidget*           fgcolor_button;
     GtkWidget*           bgcolor_button;
 
-    gboolean             about_box_initialized;
+    ScreenSaver*         about_image;
 
     GtkStatusbar*        statusbar;
     guint                render_status_message_id;
     guint                render_status_context;
     gboolean             status_dirty_flag;
 
-    GTimer*              update_rate_timer;
+    GTimer*              auto_update_rate_timer;
+    GTimer*              status_update_rate_timer;
     GTimer*              speed_timer;
     double               last_iterations;
     double               iter_speed;
@@ -85,6 +87,9 @@ struct _Explorer {
     gboolean             seeking_animation;
     gboolean             seeking_animation_transition;
     gboolean             playing_animation;
+
+    gboolean             paused;
+
     GTimeVal             last_anim_frame_time;
 
 #ifdef HAVE_GNET
@@ -121,6 +126,9 @@ void      explorer_dispose_cluster       (Explorer *self);
 
 void      explorer_run_iterations        (Explorer *self);
 void      explorer_update_gui            (Explorer *self);
+
+void      explorer_init_about            (Explorer *self);
+
 
 G_END_DECLS
 

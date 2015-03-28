@@ -11,7 +11,14 @@ fyre_LDADD = \
 	$(BINRELOC_LIBS)		\
 	$(PACKAGE_LIBS)			\
 	$(EXR_LIBS)			\
-	$(GNET_LIBS)
+	$(GNET_LIBS)			\
+	$(WIN32_LIBS)
+
+fyre_DEPENDENCIES = \
+	$(WIN32_LIBS)
+
+fyre-win32-res.o: fyre.rc *.ico
+	$(WINDRES) fyre.rc fyre-win32-res.o
 
 if HAVE_EXR
 EXR_SRC = \
@@ -24,6 +31,8 @@ if HAVE_GNET
 GNET_SRC = \
 	remote-server.c			\
 	remote-client.c			\
+	discovery-server.c		\
+	discovery-client.c		\
 	explorer-cluster.c		\
 	cluster-model.c
 else
@@ -56,6 +65,7 @@ fyre_SOURCES = 				\
 	spline.c			\
 	explorer-tools.c		\
 	explorer-animation.c		\
+	explorer-about.c		\
 	cell-renderer-transition.c	\
 	cell-renderer-bifurcation.c	\
 	histogram-imager.c		\
@@ -63,6 +73,7 @@ fyre_SOURCES = 				\
 	parameter-holder.c		\
 	bifurcation-diagram.c		\
 	math-util.c			\
+	gui-util.c			\
 	avi-writer.c			\
 	parameter-editor.c		\
 	histogram-view.c		\
@@ -89,6 +100,7 @@ noinst_HEADERS =			\
 	curve-editor.h			\
 	de-jong.h			\
 	explorer.h			\
+	gui-util.h			\
 	histogram-imager.h		\
 	histogram-view.h		\
 	iterative-map.h			\
@@ -101,4 +113,7 @@ noinst_HEADERS =			\
 	var-int.h			\
 	remote-server.h			\
 	remote-client.h			\
-	probability-map.h
+	probability-map.h		\
+	discovery-server.h		\
+	discovery-client.h
+

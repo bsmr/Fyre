@@ -45,9 +45,11 @@
 #include "screensaver.h"
 #include "remote-server.h"
 #include "batch-image-render.h"
+#include "gui-util.h"
 
 #ifdef HAVE_GNET
 #include "cluster-model.h"
+#include "discovery-server.h"
 #endif
 
 static void usage                  (char          **argv);
@@ -63,7 +65,8 @@ int main(int argc, char ** argv) {
     Animation* animation;
     gboolean animate = FALSE;
     gboolean have_gtk;
-    gboolean dofork = TRUE;
+    gboolean verbose = FALSE;
+    gboolean hidden = FALSE;
     enum {INTERACTIVE, RENDER, SCREENSAVER, REMOTE} mode = INTERACTIVE;
     const gchar *outputFile = NULL;
     int c, option_index=0;
@@ -75,27 +78,37 @@ int main(int argc, char ** argv) {
     g_type_init();
     have_gtk = gtk_init_check(&argc, &argv);
 
+#ifdef HAVE_GNET
+    gnet_init();
+#  ifdef WIN32
+    gnet_ipv6_set_policy(GIPV6_POLICY_IPV4_ONLY);
+#  endif
+#endif
+
     map = ITERATIVE_MAP(de_jong_new());
     animation = animation_new();
 
     while (1) {
 	static struct option long_options[] = {
-	    {"help",        0, NULL, 'h'},
-	    {"read",        1, NULL, 'i'},
-	    {"animate",     1, NULL, 'n'},
-	    {"output",      1, NULL, 'o'},
-	    {"param",       1, NULL, 'p'},
-	    {"size",        1, NULL, 's'},
-	    {"oversample",  1, NULL, 'S'},
-	    {"density",     1, NULL, 't'},
-	    {"remote",      0, NULL, 'r'},
-	    {"nofork",      0, NULL, 'D'},
-	    {"port",        1, NULL, 'P'},
-	    {"cluster",     1, NULL, 'c'},
-	    {"screensaver", 0, NULL, 1000},   /* Undocumented, still experimental */
+	    {"help",         0, NULL, 'h'},
+	    {"read",         1, NULL, 'i'},
+	    {"animate",      1, NULL, 'n'},
+	    {"output",       1, NULL, 'o'},
+	    {"param",        1, NULL, 'p'},
+	    {"size",         1, NULL, 's'},
+	    {"oversample",   1, NULL, 'S'},
+	    {"density",      1, NULL, 't'},
+	    {"remote",       0, NULL, 'r'},
+	    {"verbose",      0, NULL, 'v'},
+	    {"port",         1, NULL, 'P'},
+	    {"cluster",      1, NULL, 'c'},
+	    {"auto-cluster", 0, NULL, 'C'},
+	    {"screensaver",  0, NULL, 1000},   /* Undocumented, still experimental */
+	    {"hidden",       0, NULL, 1001},
+	    {"chdir",        1, NULL, 1002},   /* Undocumented, used by win32 file associations */
 	    {NULL},
 	};
-	c = getopt_long(argc, argv, "hi:n:o:p:s:S:t:rDP:c:",
+	c = getopt_long(argc, argv, "hi:n:o:p:s:S:t:rvP:c:C",
 			long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -138,29 +151,46 @@ int main(int argc, char ** argv) {
 	    mode = REMOTE;
 	    break;
 
-	case 'D':
-	    dofork = FALSE;
+	case 'v':
+	    verbose = TRUE;
 	    break;
 
 	case 'P':
 	    port_number = atol(optarg);
 	    break;
 
-	case 'c':
 #ifdef HAVE_GNET
+	case 'c':
 	    {
 		ClusterModel *cluster = cluster_model_get(map, TRUE);
 		cluster_model_add_nodes(cluster, optarg);
 	    }
+	    break;
+	case 'C':
+	    {
+		ClusterModel *cluster = cluster_model_get(map, TRUE);
+		cluster_model_enable_discovery(cluster);
+	    }
+	    break;
 #else
+	case 'c':
+	case 'C':
 	    fprintf(stderr,
 		    "This Fyre binary was compiled without gnet support.\n"
 		    "Cluster support is not available.\n");
+	    break;
 #endif
+
+	case 1000: /* --screensaver */
+	    mode = SCREENSAVER;
 	    break;
 
-	case 1000:
-	    mode = SCREENSAVER;
+	case 1001: /* --hidden */
+	    hidden = TRUE;
+	    break;
+
+	case 1002: /* --chdir */
+	    chdir(optarg);
 	    break;
 
 	case 'h':
@@ -204,7 +234,7 @@ int main(int argc, char ** argv) {
 	break;
     }
 
-    case RENDER:
+    case RENDER: {
 	acquire_console();
 	if (error) {
 	    g_print ("Error: %s\n", error->message);
@@ -215,34 +245,53 @@ int main(int argc, char ** argv) {
 	else
 	    batch_image_render (map, outputFile, target_density);
 	break;
+    }
 
-    case REMOTE:
+    case REMOTE: {
 #ifdef HAVE_GNET
-#  ifdef HAVE_FORK
-	/* FIXME: Don't assume HAVE_FORK means that daemon() will work */
-	if (dofork) {
-	    if (daemon(0, 0) < 0) {
-	        perror("daemon");
-	        return 1;
-	    }
+        if (verbose) {
+	    acquire_console();
 	}
+	else {
+#  ifdef HAVE_FORK
+	    /* FIXME: Don't assume HAVE_FORK means that daemon() will work */
+	    if (daemon(0, 0) < 0) {
+		perror("daemon");
+		return 1;
+	    }
 #  endif
-	remote_server_main_loop(port_number, have_gtk);
+	}
+	if (!hidden)
+	    discovery_server_new(FYRE_DEFAULT_SERVICE, port_number);
+	remote_server_main_loop(port_number, have_gtk, verbose);
 #else
 	fprintf(stderr,
 		"This Fyre binary was compiled without gnet support.\n"
 		"Remote control mode is not available.\n");
 #endif
 	break;
+    }
 
-    case SCREENSAVER:
+    case SCREENSAVER: {
+	ScreenSaver* screensaver;
+	GtkWidget* window;
+
 	if (!have_gtk) {
 	    fprintf(stderr, "GTK intiailization failed, can't start in screensaver mode\n");
 	    return 1;
 	}
-	screensaver_new(map, animation);
+
+	screensaver = screensaver_new(map, animation);
+	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	fyre_set_icon_later(window);
+	gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+	gtk_window_set_title(GTK_WINDOW(window), "Fyre Screensaver");
+	gtk_container_add(GTK_CONTAINER(window), screensaver->view);
+	gtk_widget_show_all(window);
+
 	gtk_main();
 	break;
+    }
     }
 
     return 0;
@@ -262,11 +311,20 @@ static void usage(char **argv) {
 	    "  -o, --output FILE       Instead of presenting an interactive GUI, render\n"
 	    "                            an image or animation with the provided settings\n"
 	    "                            noninteractively, and store it in FILE.\n"
-	    "  -r, --remote            Remote control mode. This is an automation-friendly\n"
-	    "                            interface provided on stdin and stdout.\n"
-	    "  -P N, --port N          Set the TCP port number used for remote control mode\n"
+	    "\n"
+	    "Clustering:\n"
 	    "  -c LIST, --cluster LIST Use a rendering cluster, specified as a comma-separated\n"
 	    "                            list of hostnames, optionally of the form host:port.\n"
+	    "  -C, --auto-cluster      Automatically search for cluster nodes, adding them\n"
+            "                            as they become available."
+	    "  -r, --remote            Remote control mode. Fyre will listen by default on\n"
+	    "                            port 7931 for commands, and can act as a rendering\n"
+	    "                            server in a cluster.\n"
+	    "  -P N, --port N          Set the TCP port number used for remote control mode.\n"
+	    "  -v, --verbose           In remote control mode, display status messages on the\n"
+	    "                            console and don't run as a daemon.\n"
+	    "  --hidden                In remote control mode, don't reply to broadcast\n"
+	    "                            requests for detecting available Fyre servers.\n"
 	    "\n"
 	    "Parameters:\n"
 	    "  -p, --param KEY=VALUE   Set a calculation or rendering parameter, using the\n"
