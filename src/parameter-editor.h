@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * parameter-editor.h - Automatically constructs a GUI for editing the
  *                      parameters of a ParameterHolder instance.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -41,20 +42,20 @@ typedef struct _ParameterEditor      ParameterEditor;
 typedef struct _ParameterEditorClass ParameterEditorClass;
 
 struct _ParameterEditor {
-  GtkVBox parent;
+    GtkVBox parent;
 
-  ParameterHolder *holder;
-  GtkSizeGroup *label_sizegroup;
-  gchar *previous_group;
+    ParameterHolder *holder;
+    GtkSizeGroup *label_sizegroup;
+    gchar *previous_group;
 
-  gboolean suppress_notify;
-  gboolean suppress_changed;
+    gboolean suppress_notify;
+    gboolean suppress_changed;
 };
 
 struct _ParameterEditorClass {
-  GtkVBoxClass parent_class;
+    GtkVBoxClass parent_class;
 
-  void (* parameter_editor) (ParameterEditor *cb);
+    void (* parameter_editor) (ParameterEditor *cb);
 };
 
 

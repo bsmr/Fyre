@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * cell-renderer-transition.h - A GtkCellRenderer for viewing a keyframe's transition,
  *                              including the transition curve and duration.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -41,17 +42,17 @@ typedef struct _CellRendererTransition      CellRendererTransition;
 typedef struct _CellRendererTransitionClass CellRendererTransitionClass;
 
 struct _CellRendererTransition {
-  GtkCellRenderer parent;
+    GtkCellRenderer parent;
 
-  double duration;
-  Spline *spline;
-  guint spline_size;
+    double duration;
+    Spline *spline;
+    guint spline_size;
 };
 
 struct _CellRendererTransitionClass {
-  GtkCellRendererClass parent_class;
+    GtkCellRendererClass parent_class;
 
-  void (* cell_renderer_transition) (CellRendererTransition *cb);
+    void (* cell_renderer_transition) (CellRendererTransition *cb);
 };
 
 GType            cell_renderer_transition_get_type();

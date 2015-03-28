@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * chunked-file.h - A simple interface for reading and writing binary files
  *                  consisting of PNG-style chunks with 4-character identifiers.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License

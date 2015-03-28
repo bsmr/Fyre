@@ -1,8 +1,9 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * math-util.c - Small math utilities shared by other modules
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,21 +27,21 @@
 
 
 float uniform_variate() {
-  /* A uniform random variate between 0 and 1 */
-  return g_random_double();
+    /* A uniform random variate between 0 and 1 */
+    return g_random_double();
 }
 
 float normal_variate() {
-  /* A unit-normal random variate, implemented with the Box-Muller method */
-  return sqrt(-2*log(g_random_double())) * cos(g_random_double() * (2*M_PI));
+    /* A unit-normal random variate, implemented with the Box-Muller method */
+    return sqrt(-2*log(g_random_double())) * cos(g_random_double() * (2*M_PI));
 }
 
 int find_upper_pow2(int x) {
-  /* Find the smallest power of two greater than or equal to x */
-  int p = 1;
-  while (p < x)
-    p <<= 1;
-  return p;
+    /* Find the smallest power of two greater than or equal to x */
+    int p = 1;
+    while (p < x)
+	p <<= 1;
+    return p;
 }
 
 /* The End */

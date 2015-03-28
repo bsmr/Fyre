@@ -1,10 +1,11 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * histogram-imager.h - An object that stores a 2D histogram and generates
  *                      images from it. Supports oversampling, gamma correction,
  *                      color interpolation, and exposure adjustment.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -41,67 +42,67 @@ typedef struct _HistogramImagerClass     HistogramImagerClass;
 
 
 struct _HistogramImager {
-  ParameterHolder parent;
+    ParameterHolder parent;
 
-  /* Current image size
-   */
-  guint width, height;
-  guint oversample;
-  gboolean size_dirty_flag;
+    /* Current image size
+     */
+    guint width, height;
+    guint oversample;
+    gboolean size_dirty_flag;
 
-  /* Rendering Parameters
-   *
-   * Changing these parameters will not affect the
-   * histogram, only the image generated from it.
-   */
-  gdouble exposure, gamma;
-  gdouble oversample_gamma;
-  GdkColor fgcolor, bgcolor;
-  guint fgalpha, bgalpha;
-  gboolean clamped;
-  gboolean render_dirty_flag;
+    /* Rendering Parameters
+     *
+     * Changing these parameters will not affect the
+     * histogram, only the image generated from it.
+     */
+    gdouble exposure, gamma;
+    gdouble oversample_gamma;
+    GdkColor fgcolor, bgcolor;
+    guint fgalpha, bgalpha;
+    gboolean clamped;
+    gboolean render_dirty_flag;
 
-  /* Current rendering state
-   */
-  gdouble total_points_plotted;
-  gulong peak_density;
-  GTimeVal render_start_time;
+    /* Current rendering state
+     */
+    gdouble total_points_plotted;
+    gulong peak_density;
+    GTimeVal render_start_time;
 
-  guint *histogram;
-  gboolean histogram_clear_flag;
+    guint *histogram;
+    gboolean histogram_clear_flag;
 
-  GdkPixbuf *image;
+    GdkPixbuf *image;
 
-  /* Color table, converts from histogram samples to RGB colors */
-  struct {
-    guint allocated_size;
-    guint filled_size;
-    guint32 *table;
-  } color_table;
+    /* Color table, converts from histogram samples to RGB colors */
+    struct {
+	guint allocated_size;
+	guint filled_size;
+	guint32 *table;
+    } color_table;
 
-  /* Oversampling gamma tables. For particular values of 'oversample',
-   * and 'oversample_gamma', these tables convert from 8-bit nonlinear
-   * channel value to higher precision linear values that are then
-   * summed and put through a second table for conversion back to
-   * nonlinear 8-bit.
-   */
-  struct {
-    gdouble   gamma;
-    guint     oversample;
-    guint*  linearize;
-    guint8*   nonlinearize;
-  } oversample_tables;
+    /* Oversampling gamma tables. For particular values of 'oversample',
+     * and 'oversample_gamma', these tables convert from 8-bit nonlinear
+     * channel value to higher precision linear values that are then
+     * summed and put through a second table for conversion back to
+     * nonlinear 8-bit.
+     */
+    struct {
+	gdouble   gamma;
+	guint     oversample;
+	guint*  linearize;
+	guint8*   nonlinearize;
+    } oversample_tables;
 };
 
 struct _HistogramImagerClass {
-  ParameterHolderClass parent_class;
+    ParameterHolderClass parent_class;
 };
 
 typedef struct {
-  guint *histogram;
-  guint hist_width;
-  guint density;
-  gulong plot_count;
+    guint *histogram;
+    guint hist_width;
+    guint density;
+    gulong plot_count;
 } HistogramPlot;
 
 
@@ -117,9 +118,13 @@ GdkPixbuf*       histogram_imager_make_thumbnail  (HistogramImager *self,
 						   guint            max_width,
 						   guint            max_height);
 
-void             histogram_imager_load_image_file (HistogramImager *self,
-						   const gchar     *filename);
+void	         histogram_imager_load_image_file (HistogramImager *self,
+						   const gchar     *filename,
+						   GError          **error);
 void             histogram_imager_save_image_file (HistogramImager *self,
+						   const gchar     *filename,
+						   GError          **error);
+void             exr_save_image_file              (HistogramImager *hi,
 						   const gchar     *filename);
 
 void             histogram_imager_get_hist_size   (HistogramImager *self,
@@ -129,9 +134,29 @@ void             histogram_imager_get_hist_size   (HistogramImager *self,
 void             histogram_imager_clear           (HistogramImager *self);
 gdouble          histogram_imager_get_elapsed_time (HistogramImager *self);
 
+/* The imager's histogram buffer can be exported to a compact
+ * stream format that can later be merged into an existing histogram
+ * buffer. This is useful for merging rendering results computed
+ * across several different machines. The buffer's format should be
+ * architecture-independent.
+ *
+ * histogram_imager_export_stream() returns the number of bytes saved
+ * in the provided buffer. If it runs out of buffer space, it will leave
+ * the remaining samples in HistogramImager's internal buffer. All
+ * buckets successfully exported will be emptied.
+ */
+gsize            histogram_imager_export_stream   (HistogramImager *self,
+						   guchar          *buffer,
+						   gsize            buffer_size);
+void             histogram_imager_merge_stream    (HistogramImager *self,
+						   const guchar    *buffer,
+						   gsize            buffer_size);
+
+/* These must be called before and after making plots,
+ * to initialize and save the HistogramPlot structure.
+ */
 void             histogram_imager_prepare_plots   (HistogramImager *self,
 						   HistogramPlot   *plot);
-
 void             histogram_imager_finish_plots    (HistogramImager *self,
 						   HistogramPlot   *plot);
 
@@ -151,6 +176,13 @@ void             histogram_imager_finish_plots    (HistogramImager *self,
       (plot).density = bucket; \
     } \
 } while (0)
+
+
+/************************************************************************************/
+/****************************************************************** Private Methods */
+/************************************************************************************/
+
+float histogram_imager_get_pixel_scale(HistogramImager *self);
 
 
 G_END_DECLS

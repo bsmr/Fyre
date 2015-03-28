@@ -55,7 +55,6 @@ static void curve_editor_finalize     (GObject       *object);
 static gint curve_editor_graph_events (GtkWidget     *widget,
 				       GdkEvent      *event,
 				       CurveEditor   *c);
-static void curve_editor_size_graph   (CurveEditor   *curve);
 
 enum {
   CHANGED_SIGNAL,
@@ -73,17 +72,17 @@ curve_editor_get_type (void)
   if (!curve_type)
     {
       static const GTypeInfo curve_info =
-      {
-	sizeof (CurveEditorClass),
-	NULL,		/* base_init */
-	NULL,		/* base_finalize */
-	(GClassInitFunc) curve_editor_class_init,
-	NULL,		/* class_finalize */
-	NULL,		/* class_data */
-	sizeof (CurveEditor),
-	0,		/* n_preallocs */
-	(GInstanceInitFunc) curve_editor_init,
-      };
+	{
+	  sizeof (CurveEditorClass),
+	  NULL,		/* base_init */
+	  NULL,		/* base_finalize */
+	  (GClassInitFunc) curve_editor_class_init,
+	  NULL,		/* class_finalize */
+	  NULL,		/* class_data */
+	  sizeof (CurveEditor),
+	  0,		/* n_preallocs */
+	  (GInstanceInitFunc) curve_editor_init,
+	};
 
       curve_type = g_type_register_static (GTK_TYPE_DRAWING_AREA, "CurveEditor",
 					   &curve_info, 0);
@@ -225,7 +224,7 @@ curve_editor_draw (CurveEditor *c, gint width, gint height)
 	continue;
 
       x = project (c->spline.points[i][0], 0, 1,
-		     width);
+		   width);
       y = height -
 	project (c->spline.points[i][1], 0, 1,
 		 height);
@@ -251,7 +250,6 @@ curve_editor_graph_events (GtkWidget *widget, GdkEvent *event, CurveEditor *c)
   gint closest_point = 0;
   gfloat rx, ry, min_x;
   guint distance;
-  gint x1, x2, y1, y2;
   gint retval = FALSE;
 
   w = GTK_WIDGET (c);
@@ -413,7 +411,7 @@ curve_editor_graph_events (GtkWidget *widget, GdkEvent *event, CurveEditor *c)
 	  c->cursor_type = new_type;
 
 	  cursor = gdk_cursor_new_for_display (gtk_widget_get_display (w),
-					      c->cursor_type);
+					       c->cursor_type);
 	  gdk_window_set_cursor (w->window, cursor);
 	  gdk_cursor_unref (cursor);
 	}
@@ -430,8 +428,6 @@ curve_editor_graph_events (GtkWidget *widget, GdkEvent *event, CurveEditor *c)
 void
 curve_editor_set_spline(CurveEditor* self, const Spline *spline)
 {
-  gint i;
-
   if (self->spline.points)
     g_free (self->spline.points);
 

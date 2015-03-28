@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * explorer.h - An interactive GUI for manipulating an IterativeMap
  *              object and viewing its output
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -29,6 +30,10 @@
 #include "animation.h"
 #include "animation-render-ui.h"
 
+#ifdef HAVE_GNET
+#include "cluster-model.h"
+#endif
+
 G_BEGIN_DECLS
 
 #define EXPLORER_TYPE            (explorer_get_type ())
@@ -41,45 +46,54 @@ typedef struct _Explorer      Explorer;
 typedef struct _ExplorerClass ExplorerClass;
 
 struct _Explorer {
-  GObject object;
+    GObject object;
 
-  IterativeMap *map;
-  Animation *animation;
+    IterativeMap*        map;
+    Animation*           animation;
+    AnimationRenderUi*   render_window;
 
-  GladeXML *xml;
-  GtkWidget *window;
+    GladeXML*            xml;
+    GtkWidget*           window;
+    GtkWidget*           view;
+    GtkWidget*           fgcolor_button;
+    GtkWidget*           bgcolor_button;
 
-  GtkWidget *view;
+    gboolean             about_box_initialized;
 
-  GtkStatusbar *statusbar;
-  guint render_status_message_id;
-  guint render_status_context;
-  gboolean status_dirty_flag;
+    GtkStatusbar*        statusbar;
+    guint                render_status_message_id;
+    guint                render_status_context;
+    gboolean             status_dirty_flag;
 
-  guint idler;
-  GTimeVal last_gui_update;
+    GTimer*              update_rate_timer;
+    GTimer*              speed_timer;
+    double               last_iterations;
+    double               iter_speed;
 
-  gchar* current_tool;
-  gboolean tool_active;
-  double last_mouse_x, last_mouse_y;
-  double last_click_x, last_click_y;
-  GTimeVal last_tool_idle_update;
+    gchar*               current_tool;
+    gboolean             tool_active;
+    double               last_mouse_x;
+    double               last_mouse_y;
+    double               last_click_x;
+    double               last_click_y;
+    GTimeVal             last_tool_idle_update;
 
-  GtkWidget *fgcolor_button, *bgcolor_button;
-  GtkWidget *anim_curve;
-  gboolean allow_transition_changes;
-  gboolean selecting_keyframe;
+    GtkWidget*           anim_curve;
+    gboolean             allow_transition_changes;
+    gboolean             selecting_keyframe;
 
-  gboolean seeking_animation;
-  gboolean seeking_animation_transition;
-  gboolean playing_animation;
-  GTimeVal last_anim_frame_time;
+    gboolean             seeking_animation;
+    gboolean             seeking_animation_transition;
+    gboolean             playing_animation;
+    GTimeVal             last_anim_frame_time;
 
-  AnimationRenderUi *render_window;
+#ifdef HAVE_GNET
+    ClusterModel*        cluster_model;
+#endif
 };
 
 struct _ExplorerClass {
-  GObjectClass parent_class;
+    GObjectClass         parent_class;
 };
 
 
@@ -95,16 +109,18 @@ Explorer*  explorer_new(IterativeMap *map, Animation *animation);
 /***************************************************************** Internal methods */
 /************************************************************************************/
 
-void explorer_init_tools(Explorer *self);
-gboolean explorer_update_tools(Explorer *self);
+void      explorer_init_tools            (Explorer *self);
+gboolean  explorer_update_tools          (Explorer *self);
 
-void explorer_init_animation(Explorer *self);
-void explorer_dispose_animation(Explorer *self);
-void explorer_update_animation(Explorer *self);
+void      explorer_init_animation        (Explorer *self);
+void      explorer_dispose_animation     (Explorer *self);
+void      explorer_update_animation      (Explorer *self);
 
-void explorer_run_iterations(Explorer *self);
-void explorer_update_gui(Explorer *self);
+void      explorer_init_cluster          (Explorer *self);
+void      explorer_dispose_cluster       (Explorer *self);
 
+void      explorer_run_iterations        (Explorer *self);
+void      explorer_update_gui            (Explorer *self);
 
 G_END_DECLS
 

@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * animation-render-ui.h - A user interface for preparing an animation
  *                         rendering and viewing its progress.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -43,34 +44,33 @@ typedef struct _AnimationRenderUi      AnimationRenderUi;
 typedef struct _AnimationRenderUiClass AnimationRenderUiClass;
 
 struct _AnimationRenderUi {
-  GObject object;
+    GObject object;
 
-  GladeXML *xml;
+    GladeXML *xml;
 
-  Animation *animation;
+    Animation *animation;
 
-  const gchar *filename;
-  gdouble frame_rate;
-  guint width, height, oversample;
-  gulong target_density;
+    const gchar *filename;
+    gdouble frame_rate;
+    guint width, height, oversample;
+    gulong target_density;
 
-  IterativeMap *map;
-  AviWriter *avi;
-  AnimationIter iter;
-  ParameterHolderPair frame;
-  gboolean continuation;
-  guint idler;
+    IterativeMap *map;
+    AviWriter *avi;
+    AnimationIter iter;
+    ParameterHolderPair frame;
+    gboolean continuation;
+    guint idler;
 
-  gulong iterations_per_idle;
-  gdouble elapsed_anim_time;
-  gdouble anim_length;
-  gboolean render_in_progress;
+    gdouble elapsed_anim_time;
+    gdouble anim_length;
+    gboolean render_in_progress;
 };
 
 struct _AnimationRenderUiClass {
-  GObjectClass parent_class;
+    GObjectClass parent_class;
 
-  void (* animation_render_ui) (AnimationRenderUi *self);
+    void (* animation_render_ui) (AnimationRenderUi *self);
 };
 
 

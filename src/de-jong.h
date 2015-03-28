@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * de-jong.h - The DeJong object builds on the ParameterHolder and HistogramRender
  *             objects to provide a rendering of the DeJong map into a histogram image.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -39,33 +40,33 @@ typedef struct _DeJong      DeJong;
 typedef struct _DeJongClass DeJongClass;
 
 typedef struct {
-  gdouble a, b, c, d;
+    gdouble a, b, c, d;
 } DeJongParams;
 
 struct _DeJong {
-  IterativeMap parent;
+    IterativeMap parent;
 
-  /* Calculation Parameters */
-  DeJongParams param;
-  gdouble zoom, aspect, xoffset, yoffset, rotation;
-  gdouble blur_radius, blur_ratio;
-  gboolean tileable;
+    /* Calculation Parameters */
+    DeJongParams param;
+    gdouble zoom, aspect, xoffset, yoffset, rotation;
+    gdouble blur_radius, blur_ratio;
+    gboolean tileable;
 
-  gboolean emphasize_transient;
-  guint transient_iterations;
-  gint initial_conditions;
-  gdouble initial_xscale, initial_yscale;
-  gdouble initial_xoffset, initial_yoffset;
+    gboolean emphasize_transient;
+    guint transient_iterations;
+    gint initial_conditions;
+    gdouble initial_xscale, initial_yscale;
+    gdouble initial_xoffset, initial_yoffset;
 
-  gboolean calc_dirty_flag;
+    gboolean calc_dirty_flag;
 
-  /* Current calculation state */
-  gdouble point_x, point_y;
-  guint remaining_transient_iterations;
+    /* Current calculation state */
+    gdouble point_x, point_y;
+    guint remaining_transient_iterations;
 };
 
 struct _DeJongClass {
-  IterativeMapClass parent_class;
+    IterativeMapClass parent_class;
 };
 
 

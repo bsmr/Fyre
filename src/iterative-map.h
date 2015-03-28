@@ -1,10 +1,11 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * iterative-map.h - The IterativeMap object builds on the ParameterHolder and
  *		     HistogramRender objects to provide a rendering of a chaotic
  *		     map into a histogram image.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -40,37 +41,76 @@ typedef struct _IterativeMap      IterativeMap;
 typedef struct _IterativeMapClass IterativeMapClass;
 
 struct _IterativeMap {
-  HistogramImager parent;
+    HistogramImager parent;
 
-  /* Current calculation state */
-  gdouble iterations;
+    /* Current calculation state */
+    gdouble iterations;
+
+    /* Estimated iterations per second, for calculate_timed and friends */
+    gdouble iter_speed_estimate;
+
+    /* For background rendering in the idle handler */
+    guint idle_handler;
+    double render_time;
 };
 
 struct _IterativeMapClass {
-  HistogramImagerClass parent_class;
+    HistogramImagerClass parent_class;
 
-  /* Overrideable methods */
-  void (*calculate)        (IterativeMap          *self,
-                            guint                  iterations);
-  void (*calculate_motion) (IterativeMap          *self,
-                            guint                  iterations,
-                            gboolean               continuation,
-                            ParameterInterpolator *interp,
-                            gpointer               interp_data);
+    void (*iterative_map) (IterativeMap *self);
+
+    /* Overrideable methods */
+    void (*calculate)        (IterativeMap          *self,
+			      guint                  iterations);
+    void (*calculate_motion) (IterativeMap          *self,
+			      guint                  iterations,
+			      gboolean               continuation,
+			      ParameterInterpolator *interp,
+			      gpointer               interp_data);
 };
 
 /************************************************************************************/
 /******************************************************************* Public Methods */
 /************************************************************************************/
 
-GType         iterative_map_get_type         ();
-void          iterative_map_calculate        (IterativeMap          *self,
-                                              guint                  iterations);
-void          iterative_map_calculate_motion (IterativeMap          *self,
-                                              guint                  iterations,
-                                              gboolean               continuation,
-                                              ParameterInterpolator *interp,
-                                              gpointer               interp_data);
+GType         iterative_map_get_type               ();
+
+/* Simple calculation functions, implemented by subclasses.
+ * They calculate a fixed number of iterations.
+ */
+void          iterative_map_calculate              (IterativeMap          *self,
+						    guint                  iterations);
+void          iterative_map_calculate_motion       (IterativeMap          *self,
+						    guint                  iterations,
+						    gboolean               continuation,
+						    ParameterInterpolator *interp,
+						    gpointer               interp_data);
+
+/* Calculation functions implemented by this base class,
+ * that stop after an estimated amount of time rather
+ * than a number of iterations. Each time this runs,
+ * it uses the actual time elapsed to update an estimate
+ * of the calculation speed used to come up with a
+ * number of iterations to pass the actual rendering
+ * functions.
+ */
+void          iterative_map_calculate_timed        (IterativeMap          *self,
+						    double                 seconds);
+void          iterative_map_calculate_motion_timed (IterativeMap          *self,
+						    double                 seconds,
+						    gboolean               continuation,
+						    ParameterInterpolator *interp,
+						    gpointer               interp_data);
+
+/* Start or stop running calculation from a main loop
+ * idle handler. The current 'render_time' is the number
+ * of seconds that we nominally calculate for during
+ * each main loop iteration. The default of 15ms is
+ * fine for most interactive use.
+ */
+void          iterative_map_start_calculation      (IterativeMap          *self);
+void          iterative_map_stop_calculation       (IterativeMap          *self);
+gboolean      iterative_map_is_calculation_running (IterativeMap          *self);
 
 G_END_DECLS
 

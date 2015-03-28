@@ -1,8 +1,9 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * screensaver.h - A self-running Fyre screen saver
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,7 +26,7 @@
 
 #include <gtk/gtk.h>
 #include "animation.h"
-#include "de-jong.h"
+#include "iterative-map.h"
 
 G_BEGIN_DECLS
 
@@ -39,25 +40,25 @@ typedef struct _ScreenSaver      ScreenSaver;
 typedef struct _ScreenSaverClass ScreenSaverClass;
 
 struct _ScreenSaver {
-  GObject object;
+    GObject object;
 
-  IterativeMap *map;
-  Animation *animation;
+    IterativeMap *map;
+    Animation *animation;
 
-  gdouble framerate;
-  IterativeMap **frame_renders;
-  ParameterHolderPair *frame_parameters;
-  int num_frames, current_frame;
-  int direction;
+    gdouble framerate;
+    IterativeMap **frame_renders;
+    ParameterHolderPair *frame_parameters;
+    int num_frames, current_frame;
+    int direction;
 
-  GtkWidget *window;
-  GtkWidget *view;
+    GtkWidget *window;
+    GtkWidget *view;
 
-  guint idler;
+    guint idler;
 };
 
 struct _ScreenSaverClass {
-  GObjectClass parent_class;
+    GObjectClass parent_class;
 };
 
 

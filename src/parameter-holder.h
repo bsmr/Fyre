@@ -1,10 +1,11 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * parameter-holder.h - A base class for GObjects whose properties include
  *                      algorithm parameters that can be serialized to key/value
  *                      pairs and interpolated between.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -39,35 +40,35 @@ typedef struct _ParameterHolder      ParameterHolder;
 typedef struct _ParameterHolderClass ParameterHolderClass;
 
 typedef struct _ToolInput {
-  double delta_x, delta_y;
-  double absolute_x, absolute_y;
-  double click_relative_x, click_relative_y;
-  double delta_time;
-  GdkModifierType state;
+    double delta_x, delta_y;
+    double absolute_x, absolute_y;
+    double click_relative_x, click_relative_y;
+    double delta_time;
+    GdkModifierType state;
 } ToolInput;
 
 struct _ParameterHolder {
-  GObject object;
+    GObject object;
 };
 
 typedef void (ToolHandlerPH)(ParameterHolder *self, ToolInput *i);
 
 typedef enum {
-  TOOL_USE_MOTION_EVENTS = 1 << 0,
-  TOOL_USE_IDLE          = 1 << 1,
+    TOOL_USE_MOTION_EVENTS = 1 << 0,
+    TOOL_USE_IDLE          = 1 << 1,
 } ToolFlags;
 
 typedef struct _ToolInfoPH {
-  gchar *menu_label;
-  ToolHandlerPH *handler;
-  ToolFlags flags;
+    gchar *menu_label;
+    ToolHandlerPH *handler;
+    ToolFlags flags;
 } ToolInfoPH;
 
 struct _ParameterHolderClass {
-  GObjectClass parent_class;
+    GObjectClass parent_class;
 
-  /* Overrideable methods */
-  ToolInfoPH* (*get_tools) ();
+    /* Overrideable methods */
+    ToolInfoPH* (*get_tools) ();
 };
 
 typedef void (ParameterInterpolator)(ParameterHolder  *self,
@@ -77,7 +78,7 @@ typedef void (ParameterInterpolator)(ParameterHolder  *self,
 #define PARAMETER_INTERPOLATOR(x)   ((ParameterInterpolator*)(x))
 
 typedef struct {
-  ParameterHolder *a, *b;
+    ParameterHolder *a, *b;
 } ParameterHolderPair;
 
 
@@ -88,8 +89,8 @@ typedef struct {
 
 /* This is attached to the "increments" quark using param_spec_set_increments */
 typedef struct {
-  gdouble step, page;
-  int digits;
+    gdouble step, page;
+    int digits;
 } ParameterIncrements;
 
 
@@ -107,6 +108,8 @@ void              parameter_holder_reset_to_defaults  (ParameterHolder *self);
 void              parameter_holder_set                (ParameterHolder *self,
 						       const gchar     *property,
 						       const gchar     *value);
+void              parameter_holder_set_from_line      (ParameterHolder *self,
+						       const gchar     *line);
 
 void              parameter_holder_load_string        (ParameterHolder *self,
 						       const gchar     *params);

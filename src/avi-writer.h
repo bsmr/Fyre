@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * avi-writer.h - A simple interface for writing uncompressed RGB frames to
  *                a Microsoft AVI video file.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -39,24 +40,24 @@ typedef struct _AviWriter      AviWriter;
 typedef struct _AviWriterClass AviWriterClass;
 
 struct _AviWriter {
-  GObject object;
+    GObject object;
 
-  FILE *file;
+    FILE *file;
 
-  guint width, height;
-  float frame_rate;
-  guint32 frame_count;
+    guint width, height;
+    float frame_rate;
+    guint32 frame_count;
 
-  /* A stack of RIFF chunks that need their sizes fixed */
-  GSList *chunk_stack;
+    /* A stack of RIFF chunks that need their sizes fixed */
+    GSList *chunk_stack;
 
-  /* Offsets of particular things we need to fix later */
-  long frame_count_offset;
-  long length_offset;
+    /* Offsets of particular things we need to fix later */
+    long frame_count_offset;
+    long length_offset;
 };
 
 struct _AviWriterClass {
-  GObjectClass parent_class;
+    GObjectClass parent_class;
 };
 
 

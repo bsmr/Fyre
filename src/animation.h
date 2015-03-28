@@ -1,8 +1,9 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * animation.h - A simple keyframe animation system for ParameterHolder objects
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -38,35 +39,36 @@ typedef struct _Animation      Animation;
 typedef struct _AnimationClass AnimationClass;
 
 struct _Animation {
-  GObject object;
+    GObject object;
 
-  GtkListStore *model;
+    GtkListStore *model;
+    gulong next_row_id;
 };
 
 struct _AnimationClass {
-  GObjectClass parent_class;
+    GObjectClass parent_class;
 };
 
 /* Items in the GdkListStore holding our keyframes */
 enum {
-  ANIMATION_MODEL_THUMBNAIL,    /* The thumbnail, as a GdkPixbuf */
-  ANIMATION_MODEL_PARAMS,       /* The parameters, serialized to a string */
-  ANIMATION_MODEL_DURATION,     /* The duration of the following transition, in seconds */
-  ANIMATION_MODEL_SPLINE,       /* The interpolation spline, a boxed Spline instance */
-  ANIMATION_MODEL_ITER,         /* A GtkTreeIter pointing to this node */
-  ANIMATION_MODEL_BIFURCATION,  /* Cached BifurcationDiagram instance for this keyframe */
+    ANIMATION_MODEL_THUMBNAIL,    /* The thumbnail, as a GdkPixbuf */
+    ANIMATION_MODEL_PARAMS,       /* The parameters, serialized to a string */
+    ANIMATION_MODEL_DURATION,     /* The duration of the following transition, in seconds */
+    ANIMATION_MODEL_SPLINE,       /* The interpolation spline, a boxed Spline instance */
+    ANIMATION_MODEL_ROW_ID,       /* A unique ID for this row */
+    ANIMATION_MODEL_BIFURCATION,  /* Cached BifurcationDiagram instance for this keyframe */
 };
 
 typedef struct _AnimationIter {
-  GtkTreeIter keyframe;
-  gboolean valid;
-  gdouble absolute_time;
-  gdouble time_after_keyframe;
+    GtkTreeIter keyframe;
+    gboolean valid;
+    gdouble absolute_time;
+    gdouble time_after_keyframe;
 } AnimationIter;
 
 typedef struct {
-  Animation *self;
-  GtkTreeIter iter;
+    Animation *self;
+    GtkTreeIter iter;
 } AnimChunkState;
 
 
@@ -97,7 +99,9 @@ void         animation_store_chunk           (AnimChunkState      *state,
 					      gsize                length,
 					      const guchar        *data);
 
-/* Keyframe manipulation */
+/* Keyframe manipulation
+ * Normal GtkTreeIters are used to refer to keyframes.
+ */
 void         animation_keyframe_store        (Animation           *self,
 					      GtkTreeIter         *iter,
 					      ParameterHolder     *key);
@@ -108,8 +112,17 @@ void         animation_keyframe_append       (Animation           *self,
 					      ParameterHolder     *key);
 gdouble      animation_keyframe_get_time     (Animation           *self,
 					      GtkTreeIter         *iter);
+gulong       animation_keyframe_get_id       (Animation           *self,
+					      GtkTreeIter         *iter);
+gboolean     animation_keyframe_find_by_id   (Animation           *self,
+					      gulong               id,
+					      GtkTreeIter         *iter);
 
-/* Animation iterators */
+/* Animation iterators
+ * Iterators can seek through an animation using wallclock-time,
+ * and they are used to extract parameter sets for rendering.
+ * Animation iters can be placed anywhere, not just at a keyframe.
+ */
 gdouble      animation_get_length            (Animation           *self);
 void         animation_iter_get_first        (Animation           *self,
 					      AnimationIter       *iter);

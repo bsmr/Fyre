@@ -1,8 +1,9 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * histogram-view.h - A DrawingArea subclass that displays the results of a HistogramImager
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -40,18 +41,18 @@ typedef struct _HistogramView      HistogramView;
 typedef struct _HistogramViewClass HistogramViewClass;
 
 struct _HistogramView {
-  GtkDrawingArea parent;
+    GtkDrawingArea parent;
 
-  HistogramImager *imager;
-  GdkPixbuf *viewable_image;
+    HistogramImager *imager;
+    GdkPixbuf *viewable_image;
 
-  int old_width, old_height;
+    int old_width, old_height;
 };
 
 struct _HistogramViewClass {
-  GtkDrawingAreaClass parent_class;
+    GtkDrawingAreaClass parent_class;
 
-  void (* histogram_view) (HistogramView *cb);
+    void (* histogram_view) (HistogramView *cb);
 };
 
 

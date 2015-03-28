@@ -1,9 +1,10 @@
-/*
+/* -*- mode: c; c-basic-offset: 4; -*-
+ *
  * cell-renderer-bifurcation.h - A GtkCellRenderer for viewing a bifurcation
  *                               diagram over the range of a keyframe's transition.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
- * Copyright (C) 2004 David Trowbridge and Micah Dowty
+ * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -42,16 +43,19 @@ typedef struct _CellRendererBifurcation      CellRendererBifurcation;
 typedef struct _CellRendererBifurcationClass CellRendererBifurcationClass;
 
 struct _CellRendererBifurcation {
-  GtkCellRenderer parent;
+    GtkCellRenderer parent;
 
-  Animation *animation;
-  GtkTreeIter keyframe;
+    Animation *animation;
+    gulong row_id;
+
+    /* Our parent - yes, I know this makes baby jesus cry. */
+    GtkTreeView *tree;
 };
 
 struct _CellRendererBifurcationClass {
-  GtkCellRendererClass parent_class;
+    GtkCellRendererClass parent_class;
 
-  void (* cell_renderer_bifurcation) (CellRendererBifurcation *cb);
+    void (* cell_renderer_bifurcation) (CellRendererBifurcation *cb);
 };
 
 GType            cell_renderer_bifurcation_get_type();
