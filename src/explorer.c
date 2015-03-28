@@ -21,9 +21,10 @@
  *
  */
 
-#include "config.h"
+#include <config.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 #include "explorer.h"
 #include "parameter-editor.h"
 #include "math-util.h"
@@ -39,8 +40,10 @@ static void explorer_dispose     (GObject *gobject);
 static gboolean explorer_auto_limit_update_rate (Explorer *self);
 static gboolean limit_update_rate               (GTimer* timer, float max_rate);
 static gdouble  explorer_get_iter_speed         (Explorer *self);
+static gchar*   explorer_strdup_elapsed         (Explorer *self);
 static gchar*   explorer_strdup_status          (Explorer *self);
 static gchar*   explorer_strdup_speed           (Explorer *self);
+static gchar*   explorer_strdup_quality         (Explorer *self);
 static void     explorer_update_status_bar      (Explorer *self);
 
 static gdouble generate_random_param();
@@ -101,12 +104,22 @@ static void explorer_init(Explorer *self) {
 
     if (g_file_test (FYRE_DATADIR "/explorer.glade", G_FILE_TEST_EXISTS))
         self->xml = glade_xml_new (FYRE_DATADIR "/explorer.glade", NULL, NULL);
-#ifdef ENABLE_BINRELOC
     if (!self->xml)
 	self->xml = glade_xml_new(BR_DATADIR("/fyre/explorer.glade"), NULL, NULL);
-#endif
-
-    self->paused = FALSE;
+    if (!self->xml) {
+	GtkWidget *dialog;
+	dialog = gtk_message_dialog_new_with_markup(NULL, 0, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+						    "<b>Fyre can't find its data files.</b>\n\n"
+						    "The main glade file could not be located.\n"
+						    "We tried looking for it in the following places:\n"
+						    "\n"
+						    "    %s\n"
+						    "    %s",
+						    FYRE_DATADIR "/explorer.glade",
+						    BR_DATADIR("/fyre/explorer.glade"));
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	exit(0);
+    }
 
     self->window = glade_xml_get_widget(self->xml, "explorer_window");
     fyre_set_icon_later(self->window);
@@ -151,6 +164,7 @@ static void explorer_dispose(GObject *gobject) {
 
     explorer_dispose_animation(self);
     explorer_dispose_cluster(self);
+    explorer_dispose_history(self);
 
     if (self->speed_timer) {
 	g_timer_destroy(self->speed_timer);
@@ -194,6 +208,7 @@ Explorer* explorer_new(IterativeMap *map, Animation *animation) {
     /* Set the initial render time */
     on_render_time_changed(glade_xml_get_widget(self->xml, "render_time"), self);
 
+    explorer_init_history(self);
     explorer_init_animation(self);
     explorer_init_tools(self);
     explorer_init_cluster(self);
@@ -320,10 +335,8 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
 
     if (emblem_pixbuf == NULL) {
 	emblem_pixbuf = gdk_pixbuf_new_from_file (FYRE_DATADIR "/metadata-emblem.png", NULL);
-#ifdef ENABLE_BINRELOC
 	if (!emblem_pixbuf)
 	    emblem_pixbuf = gdk_pixbuf_new_from_file (BR_DATADIR ("/fyre/metadata-emblem.png"), NULL);
-#endif
     }
 
     filename = gtk_file_chooser_get_filename (chooser);
@@ -546,15 +559,46 @@ static gboolean on_interactive_prefs_delete(GtkWidget *widget, GdkEvent *event, 
 /************************************************************************************/
 
 static void on_pause_rendering_toggle(GtkWidget *widget, Explorer* self) {
-    self->paused = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(widget));
-    if (self->paused)
+    if (gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(widget)))
 	iterative_map_stop_calculation(self->map);
     else
 	iterative_map_start_calculation(self->map);
 
+    /* Since the user is changing the pause state, let's refrain from
+     * messing with it on explorer_restore_pause().
+     */
+    self->unpause_on_restore = FALSE;
+
     /* Update the speed shown in the status bar */
     self->status_dirty_flag = TRUE;
     explorer_update_gui(self);
+}
+
+void      explorer_force_pause           (Explorer *self)
+{
+    /* Force rendering to pause now, but keep note of its original state
+     * so that explorer_restore_pause() can undo this as necessary.
+     */
+    GtkCheckMenuItem *paused = GTK_CHECK_MENU_ITEM(glade_xml_get_widget(self->xml, "pause_menu"));
+    gboolean original_state = gtk_check_menu_item_get_active(paused);
+    gtk_check_menu_item_set_active(paused, TRUE);
+
+    /* Now, on_pause_rendering_toggle just disabled unpause_on_restore since
+     * typically only a user changes the pause_menu state. We want to turn
+     * that back on if we just paused it and originally it was unpaused,
+     * so that explorer_restore_pause() does the Right Thing (tm).
+     */
+    self->unpause_on_restore = !original_state;
+}
+
+void      explorer_restore_pause         (Explorer *self)
+{
+    if (self->unpause_on_restore) {
+	GtkCheckMenuItem *paused = GTK_CHECK_MENU_ITEM(glade_xml_get_widget(self->xml, "pause_menu"));
+
+	self->unpause_on_restore = FALSE;
+	gtk_check_menu_item_set_active(paused, FALSE);
+    }
 }
 
 static void on_calculation_finished(IterativeMap *map, Explorer* self)
@@ -676,19 +720,34 @@ static void explorer_update_status_bar(Explorer *self)
 static gchar*   explorer_strdup_status (Explorer *self)
 {
     gchar *status;
+    gchar *elapsed = explorer_strdup_elapsed(self);
     gchar *speed = explorer_strdup_speed(self);
+    gchar *quality = explorer_strdup_quality(self);
 
-    status = g_strdup_printf("Iterations:    %.3e    \t"
-			     "Speed:    %s    \t"
-			     "Peak density:    %ld    \t"
+    status = g_strdup_printf("Elapsed time: %s\t\t"
+			     "Iterations: %.3e\t\t"
+			     "Speed: %s\t\t"
+			     "Quality: %s\t\t"
 			     "Current tool: %s",
+			     elapsed,
 			     self->map->iterations,
 			     speed,
-			     HISTOGRAM_IMAGER(self->map)->peak_density,
+			     quality,
 			     self->current_tool);
 
+    g_free(elapsed);
     g_free(speed);
+    g_free(quality);
     return status;
+}
+
+static gchar*   explorer_strdup_elapsed (Explorer *self)
+{
+    gulong elapsed = (gulong) histogram_imager_get_elapsed_time(HISTOGRAM_IMAGER(self->map));
+    return g_strdup_printf("%02ld:%02ld:%02ld",
+			   elapsed / (60*60),
+			   (elapsed / 60) % 60,
+			   elapsed % 60);
 }
 
 static gchar*   explorer_strdup_speed (Explorer *self)
@@ -697,6 +756,15 @@ static gchar*   explorer_strdup_speed (Explorer *self)
 	return g_strdup_printf("%.3e/sec", explorer_get_iter_speed(self));
     else
 	return g_strdup("Paused");
+}
+
+static gchar*   explorer_strdup_quality (Explorer *self)
+{
+    gdouble q = histogram_imager_compute_quality(HISTOGRAM_IMAGER(self->map));
+    if (q > (G_MAXDOUBLE / 2))
+	return g_strdup("N/A");
+    else
+	return g_strdup_printf("%.3f", q);
 }
 
 static gdouble  explorer_get_iter_speed(Explorer *self)

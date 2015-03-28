@@ -25,6 +25,7 @@
 
 #include "histogram-imager.h"
 #include "var-int.h"
+#include "image-fu.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,7 +39,7 @@ static void histogram_imager_set_property (GObject *object, guint prop_id, const
 static void histogram_imager_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 static void histogram_imager_resize_from_string (HistogramImager *self, const gchar *s);
 
-static void histogram_imager_generate_color_table (HistogramImager *self);
+static void histogram_imager_generate_color_table (HistogramImager *self, gboolean force);
 
 static void histogram_imager_check_dirty_flags (HistogramImager *self);
 static void histogram_imager_require_histogram (HistogramImager *self);
@@ -77,6 +78,7 @@ static gpointer parent_class = NULL;
 typedef enum {
     FYRE_HISTOGRAM_IMAGER_ERROR_NO_METADATA,
 } FyreHistogramImagerError;
+
 
 /************************************************************************************/
 /**************************************************** Initialization / Finalization */
@@ -282,6 +284,10 @@ histogram_imager_dispose (GObject *gobject)
     if (self->color_table.table) {
 	g_free (self->color_table.table);
 	self->color_table.table = NULL;
+    }
+    if (self->color_table.quality) {
+	g_free (self->color_table.quality);
+	self->color_table.quality = NULL;
     }
     if (self->oversample_tables.linearize) {
 	g_free (self->oversample_tables.linearize);
@@ -578,9 +584,12 @@ histogram_imager_make_thumbnail (HistogramImager *self, guint max_width, guint m
 {
     float aspect = ((float)self->width) / ((float)self->height);
     guint width, height;
+    GdkPixbuf *thumb;
 
+    /* Make sure the histogram is up to date */
     histogram_imager_update_image (self);
 
+    /* Scale it down aspect-correctly */
     if (aspect > 1) {
 	width = max_width;
 	height = width / aspect;
@@ -589,8 +598,21 @@ histogram_imager_make_thumbnail (HistogramImager *self, guint max_width, guint m
 	height = max_height;
 	width = height * aspect;
     }
+    width = MAX(width, 5);
+    height = MAX(height, 5);
+    thumb = gdk_pixbuf_scale_simple (self->image, width, height, GDK_INTERP_BILINEAR);
 
-    return gdk_pixbuf_scale_simple (self->image, width, height, GDK_INTERP_BILINEAR);
+    /* Do an in-place composite of a checkerboard behind this image, to make alpha visible */
+    image_add_checkerboard(thumb);
+
+    /* If the image is particularly small, enhance its visibility */
+    if (width < 128 || height < 128)
+	image_adjust_levels(thumb);
+
+    /* Put a standard frame around it */
+    image_add_thumbnail_frame(thumb);
+
+    return thumb;
 }
 
 
@@ -644,7 +666,7 @@ histogram_imager_update_image (HistogramImager *self)
     histogram_imager_check_dirty_flags (self);
     histogram_imager_require_histogram (self);
     histogram_imager_require_image (self);
-    histogram_imager_generate_color_table (self);
+    histogram_imager_generate_color_table (self, TRUE);
 
     {
 	guint32 *pixel_p;
@@ -769,11 +791,15 @@ histogram_imager_resize_color_table (HistogramImager *self, gulong size)
 	(self->color_table.allocated_size > 10 * size)) {
 	if (self->color_table.table)
 	    g_free (self->color_table.table);
+	if (self->color_table.quality)
+	    g_free (self->color_table.quality);
 
 	/* Allocate it to double the size we need now, as we expect our needs to grow. */
 	self->color_table.allocated_size = size * 2;
 	self->color_table.table = g_malloc (self->color_table.allocated_size *
 					    sizeof(self->color_table.table[0]));
+	self->color_table.quality = g_malloc (self->color_table.allocated_size *
+						sizeof(self->color_table.quality[0]));
     }
 }
 
@@ -809,17 +835,21 @@ histogram_imager_get_pixel_scale (HistogramImager *self)
 }
 
 static void
-histogram_imager_generate_color_table (HistogramImager *self)
+histogram_imager_generate_color_table (HistogramImager *self, gboolean force)
 {
     /* Regenerate the contents of the color mapping table, a mapping from all
      * possible histogram values to the corresponding ARGB color, in the current image.
      */
     guint count;
-    int r, g, b, a;
     float pixel_scale = histogram_imager_get_pixel_scale (self);
     gulong usable_density = histogram_imager_get_max_usable_density (self);
     float luma;
     double one_over_gamma = 1/self->gamma;
+    float distance = 0;
+    gulong color_table_size;
+    struct {
+	int r, g, b, a;
+    } current, previous;
 
     /* Our actual color table size should be either the maximum
      * usable density, or our histogram's current peak density,
@@ -828,8 +858,15 @@ histogram_imager_generate_color_table (HistogramImager *self)
     if (usable_density > self->peak_density)
 	usable_density = self->peak_density;
 
+    /* If the table is already the right size and we aren't being
+     * forced to regenerate it, stop now.
+     */
+    color_table_size = usable_density + 1;
+    if ((!force) && self->color_table.filled_size == color_table_size)
+	return;
+
     /* Make sure our table is appropriately sized */
-    histogram_imager_resize_color_table (self, usable_density + 1);
+    histogram_imager_resize_color_table (self, color_table_size);
 
     /* Generate one color for every currently-possible count value that
      * doesn't fully saturate our image, as determined by histogram_imager_get_max_usable_density
@@ -845,19 +882,43 @@ histogram_imager_generate_color_table (HistogramImager *self)
 	    luma = 1;
 
 	/* Linearly interpolate between fgcolor and bgcolor */
-	r = ((int)(self->bgcolor.red   * (1-luma) + self->fgcolor.red   * luma)) >> 8;
-	g = ((int)(self->bgcolor.green * (1-luma) + self->fgcolor.green * luma)) >> 8;
-	b = ((int)(self->bgcolor.blue  * (1-luma) + self->fgcolor.blue  * luma)) >> 8;
-	a = ((int)(self->bgalpha       * (1-luma) + self->fgalpha       * luma)) >> 8;
+	current.r = ((int)(self->bgcolor.red   * (1-luma) + self->fgcolor.red   * luma)) >> 8;
+	current.g = ((int)(self->bgcolor.green * (1-luma) + self->fgcolor.green * luma)) >> 8;
+	current.b = ((int)(self->bgcolor.blue  * (1-luma) + self->fgcolor.blue  * luma)) >> 8;
+	current.a = ((int)(self->bgalpha       * (1-luma) + self->fgalpha       * luma)) >> 8;
 
 	/* Always clamp color components */
-	if (r<0) r = 0;  if (r>255) r = 255;
-	if (g<0) g = 0;  if (g>255) g = 255;
-	if (b<0) b = 0;  if (b>255) b = 255;
-	if (a<0) a = 0;  if (a>255) a = 255;
+	if (current.r<0) current.r = 0;  if (current.r>255) current.r = 255;
+	if (current.g<0) current.g = 0;  if (current.g>255) current.g = 255;
+	if (current.b<0) current.b = 0;  if (current.b>255) current.b = 255;
+	if (current.a<0) current.a = 0;  if (current.a>255) current.a = 255;
 
 	/* Colors are always ARGB order in little endian */
-	self->color_table.table[count] = GUINT32_TO_LE( (a<<24) | (b<<16) | (g<<8) | r );
+	self->color_table.table[count] = IMAGEFU_COLOR(current.a, current.r, current.g, current.b);
+
+	/* Update our elapsed distance */
+	if (count > 0) {
+	    distance += sqrt( (current.r - previous.r) * (current.r - previous.r) +
+			      (current.g - previous.g) * (current.g - previous.g) +
+			      (current.b - previous.b) * (current.b - previous.b) +
+			      (current.a - previous.a) * (current.a - previous.a) );
+	}
+	previous = current;
+
+	/* "distance" is the distance we've traveled from the background to this
+	 * point in the color hypercube. Our quality metric is based on the number
+	 * of histogram samples per color cube samples: our 'quality' table stores
+	 * the current count divided by its corresponding distance.
+	 */
+	if (distance > 0) {
+	    self->color_table.quality[count] = count / distance;
+	}
+	else {
+	    /* We shouldn't ever use quality entries where the distance
+	     * is zero- this value is pretty arbitrary.
+	     */
+	    self->color_table.quality[count] = 0;
+	}
     }
 }
 
@@ -917,13 +978,13 @@ histogram_imager_get_max_usable_density (HistogramImager *self)
 	else clamped_a = self->bgalpha;
 
 	if (delta_r == 0) max_luma_r = 0;
-	else max_luma_r = ((double)(clamped_r - self->bgcolor.red))   / delta_r;
+	else max_luma_r = (((double)clamped_r) - self->bgcolor.red)   / delta_r;
 	if (delta_g == 0) max_luma_g = 0;
-	else max_luma_g = ((double)(clamped_g - self->bgcolor.green)) / delta_g;
+	else max_luma_g = (((double)clamped_g) - self->bgcolor.green) / delta_g;
 	if (delta_b == 0) max_luma_b = 0;
-	else max_luma_b = ((double)(clamped_b - self->bgcolor.blue))  / delta_b;
+	else max_luma_b = (((double)clamped_b) - self->bgcolor.blue)  / delta_b;
 	if (delta_a == 0) max_luma_a = 0;
-	else max_luma_a = ((double)(clamped_a - self->bgalpha))       / delta_a;
+	else max_luma_a = (((double)clamped_a) - self->bgalpha)       / delta_a;
 
 	max_luma = 0;
 	if (max_luma_r > max_luma) max_luma = max_luma_r;
@@ -945,6 +1006,79 @@ histogram_imager_get_max_usable_density (HistogramImager *self)
     if (max_usable > G_MAXINT/2)
 	max_usable = G_MAXINT/2;
     return (gulong) max_usable;
+}
+
+gdouble
+histogram_imager_compute_quality (HistogramImager *self)
+{
+    /* Compute a quality metric for the current histogram.
+     * The algorithm is described in more detail in histogram-imager.h
+     */
+    histogram_imager_check_dirty_flags (self);
+    histogram_imager_require_histogram (self);
+    histogram_imager_generate_color_table (self, FALSE);
+    {
+	guint *row = self->histogram;
+	guint *hist_p;
+	float *qual_p = self->color_table.quality;
+	guint count;
+	guint hist_clamp = self->color_table.filled_size - 1;
+	int width = self->width * self->oversample;
+	int height = self->height * self->oversample;
+	int x, y, x_scale, y_scale;
+	int stride;
+
+	gulong denominator = 0;
+	gulong num_saturated = 0;
+	double numerator = 0;
+
+	if (self->color_table.filled_size < 1)
+	    return G_MAXDOUBLE;
+
+	/* Sample the histogram at a reduced resolution, calculated
+	 * such that we get about a 256x256 grid.
+	 */
+	x_scale = MAX(1, width >> 8);
+	y_scale = MAX(1, height >> 8);
+
+	y = height;
+	stride = y_scale * width;
+	while (y > 0) {
+
+	    hist_p = row;
+	    x = width;
+	    while (x > 0) {
+		count = *hist_p;
+
+		/* We average only those buckets that fall within the output device's dynamic range */
+		if (count > hist_clamp) {
+		    num_saturated++;
+		}
+		else if (count > 0) {
+		    numerator += qual_p[count];
+		    denominator++;
+		}
+
+		x -= x_scale;
+		hist_p += x_scale;
+	    }
+
+	    y -= y_scale;
+	    row += stride;
+	}
+
+	if (!denominator)
+	    return G_MAXDOUBLE;
+
+	/* If the number of samples we have is less than 1% of the saturated
+	 * samples, this is probably a very highly saturated image like a silhouette
+	 * and it's done rendering.
+	 */
+	if (denominator < num_saturated/100)
+	    return G_MAXDOUBLE;
+
+	return numerator / denominator;
+    }
 }
 
 

@@ -77,7 +77,8 @@ struct _HistogramImager {
     struct {
 	guint allocated_size;
 	guint filled_size;
-	guint32 *table;
+	guint32 *table;      /* RGBA colors */
+	float *quality;      /* Current quality parameters for every color entry */
     } color_table;
 
     /* Oversampling gamma tables. For particular values of 'oversample',
@@ -134,6 +135,24 @@ void             histogram_imager_get_hist_size   (HistogramImager *self,
 
 void             histogram_imager_clear           (HistogramImager *self);
 gdouble          histogram_imager_get_elapsed_time (HistogramImager *self);
+
+/* Calculate a quantitative measure of the image's current rendering
+ * quality. The result is a nonzero floating point number. Higher numbers
+ * indicate better images, with 1.0 indicating a reasonable default quality.
+ * In case the image quality can't be calculated (all buckets are empty or
+ * saturated, or the color path is zero-length) this returns G_MAXDOUBLE.
+ *
+ * This is calculated by measuring the average number of histogram samples
+ * per image sample, using euclidean distances in the RGBA hypercube.
+ * This ignores buckets that are completely empty or are full enough to
+ * completely saturate the image.  A value of 1.0 therefore indicates that
+ * the average number of histogram samples exactly matches the number of
+ * samples we map to on the RGBA hypercube.
+ *
+ * Efficiency: O(width * height), plus the time required to
+ *             update the color table.
+ */
+gdouble          histogram_imager_compute_quality (HistogramImager *self);
 
 /* The imager's histogram buffer can be exported to a compact
  * stream format that can later be merged into an existing histogram

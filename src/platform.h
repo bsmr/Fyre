@@ -1,6 +1,8 @@
 /* -*- mode: c; c-basic-offset: 4; -*-
  *
- * batch-image-render.h - Still image rendering with no GUI
+ * platform.h - Platform-specific hacks, should be included
+ *              after config.h but before other headers in files
+ *              that need it.
  *
  * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004-2005 David Trowbridge and Micah Dowty
@@ -21,15 +23,20 @@
  *
  */
 
-#include "iterative-map.h"
+#ifndef __PLATFORM_H__
+#define __PLATFORM_H__
 
-#ifndef __BATCH_IMAGE_RENDER_H__
-#define __BATCH_IMAGE_RENDER_H__
+#ifdef WIN32
 
-void batch_image_render(IterativeMap*  map,
-			const char*    output_filename,
-			double         quality);
+/* This is necessary to compile at all, since ole2 defines
+ * a DATADIR constant that conflicts with ours.
+ */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 
-#endif /* __BATCH_IMAGE_RENDER_H__ */
+#endif /* WIN32 */
+
+#endif /* __PLATFORM_H__ */
 
 /* The End */

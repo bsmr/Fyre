@@ -5,7 +5,8 @@ INCLUDES = \
 	$(PACKAGE_CFLAGS)		\
 	$(EXR_CFLAGS)			\
 	$(GNET_CFLAGS)			\
-	'-DFYRE_DATADIR="data"'
+	'-DFYRE_DATADIR="data"'		\
+	'-DDATADIR="$(prefix)/share"'
 
 fyre_LDADD = \
 	$(BINRELOC_LIBS)		\
@@ -39,13 +40,6 @@ else
 GNET_SRC =
 endif
 
-if HAVE_BINRELOC
-BINRELOC_SRC = \
-	prefix.c
-else
-BINRELOC_SRC =
-endif
-
 if HAVE_GETOPT
 GETOPT_SRC =
 else
@@ -66,6 +60,7 @@ fyre_SOURCES = 				\
 	explorer-tools.c		\
 	explorer-animation.c		\
 	explorer-about.c		\
+	explorer-history.c		\
 	cell-renderer-transition.c	\
 	cell-renderer-bifurcation.c	\
 	histogram-imager.c		\
@@ -81,8 +76,9 @@ fyre_SOURCES = 				\
 	screensaver.c			\
 	batch-image-render.c		\
 	probability-map.c		\
+	prefix.c			\
+	image-fu.c			\
 	$(EXR_SRC)			\
-	$(BINRELOC_SRC)			\
 	$(GETOPT_SRC)			\
 	$(GNET_SRC)
 
@@ -115,5 +111,6 @@ noinst_HEADERS =			\
 	remote-client.h			\
 	probability-map.h		\
 	discovery-server.h		\
-	discovery-client.h
-
+	discovery-client.h              \
+        platform.h			\
+	image-fu.h

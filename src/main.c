@@ -22,6 +22,7 @@
  */
 
 #include "config.h"
+#include "platform.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -56,8 +57,11 @@ static void usage                  (char          **argv);
 static void animation_render_main  (IterativeMap   *map,
 				    Animation      *animation,
 				    const gchar    *filename,
-				    gulong          target_density);
+				    double          quality);
 static void acquire_console        (void);
+#ifdef HAVE_GNET
+static void daemonize_to_pidfile   (const char* filename);
+#endif
 
 
 int main(int argc, char ** argv) {
@@ -69,9 +73,12 @@ int main(int argc, char ** argv) {
     gboolean hidden = FALSE;
     enum {INTERACTIVE, RENDER, SCREENSAVER, REMOTE} mode = INTERACTIVE;
     const gchar *outputFile = NULL;
+    const gchar *pidfile = NULL;
     int c, option_index=0;
-    gulong target_density = 10000;
+    double quality = 1.0;
+#ifdef HAVE_GNET
     int port_number = FYRE_DEFAULT_PORT;
+#endif
     GError *error = NULL;
 
     g_random_set_seed(time(NULL));
@@ -97,7 +104,7 @@ int main(int argc, char ** argv) {
 	    {"param",        1, NULL, 'p'},
 	    {"size",         1, NULL, 's'},
 	    {"oversample",   1, NULL, 'S'},
-	    {"density",      1, NULL, 't'},
+	    {"quality",      1, NULL, 'q'},
 	    {"remote",       0, NULL, 'r'},
 	    {"verbose",      0, NULL, 'v'},
 	    {"port",         1, NULL, 'P'},
@@ -106,9 +113,11 @@ int main(int argc, char ** argv) {
 	    {"screensaver",  0, NULL, 1000},   /* Undocumented, still experimental */
 	    {"hidden",       0, NULL, 1001},
 	    {"chdir",        1, NULL, 1002},   /* Undocumented, used by win32 file associations */
+	    {"pidfile",      1, NULL, 1003},
+	    {"version",      0, NULL, 1004},
 	    {NULL},
 	};
-	c = getopt_long(argc, argv, "hi:n:o:p:s:S:t:rvP:c:C",
+	c = getopt_long(argc, argv, "hi:n:o:p:s:S:q:rvP:c:C",
 			long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -122,9 +131,15 @@ int main(int argc, char ** argv) {
         }
 
 	case 'n':
+	{
+	    GtkTreeIter iter;
+
 	    animation_load_file(animation, optarg);
 	    animate = TRUE;
+	    gtk_tree_model_get_iter_first(GTK_TREE_MODEL(animation->model), &iter);
+	    animation_keyframe_load(animation, &iter, PARAMETER_HOLDER(map));
 	    break;
+	}
 
 	case 'o':
 	    mode = RENDER;
@@ -143,20 +158,12 @@ int main(int argc, char ** argv) {
 	    parameter_holder_set(PARAMETER_HOLDER(map), "oversample", optarg);
 	    break;
 
-	case 't':
-	    target_density = atol(optarg);
-	    break;
-
-	case 'r':
-	    mode = REMOTE;
+	case 'q':
+	    quality = atof(optarg);
 	    break;
 
 	case 'v':
 	    verbose = TRUE;
-	    break;
-
-	case 'P':
-	    port_number = atol(optarg);
 	    break;
 
 #ifdef HAVE_GNET
@@ -172,12 +179,25 @@ int main(int argc, char ** argv) {
 		cluster_model_enable_discovery(cluster);
 	    }
 	    break;
+	case 'r':
+	    mode = REMOTE;
+	    break;
+	case 'P':
+	    port_number = atol(optarg);
+	    break;
 #else
 	case 'c':
 	case 'C':
+	case 'P':
 	    fprintf(stderr,
 		    "This Fyre binary was compiled without gnet support.\n"
 		    "Cluster support is not available.\n");
+	    break;
+	case 'r':
+	    fprintf(stderr,
+		    "This Fyre binary was compiled without gnet support.\n"
+		    "Cluster support is not available.\n");
+	    exit(1);
 	    break;
 #endif
 
@@ -193,6 +213,14 @@ int main(int argc, char ** argv) {
 	    chdir(optarg);
 	    break;
 
+	case 1003: /* --pidfile */
+	    pidfile = optarg;
+	    break;
+
+	case 1004: /* --version */
+	    printf("%s\n", VERSION);
+	    return 0;
+
 	case 'h':
 	default:
 	    usage(argv);
@@ -200,9 +228,31 @@ int main(int argc, char ** argv) {
 	}
     }
 
-    if (optind < argc) {
+    if (optind + 1 < argc) {
 	usage(argv);
 	return 1;
+    }
+
+    if (optind != argc) {
+	char *ext = strrchr (argv[optind], '.');
+	if (ext) {
+	    if (g_strcasecmp(ext, ".png") == 0) {
+		histogram_imager_load_image_file(HISTOGRAM_IMAGER(map), argv[optind], &error);
+	    } else if (g_strcasecmp(ext, ".fa") == 0) {
+	        GtkTreeIter iter;
+
+		animation_load_file(animation, argv[optind]);
+		animate = TRUE;
+	        gtk_tree_model_get_iter_first(GTK_TREE_MODEL(animation->model), &iter);
+	        animation_keyframe_load(animation, &iter, PARAMETER_HOLDER(map));
+	    } else {
+	        usage(argv);
+	        return 1;
+	    }
+	} else {
+	    usage(argv);
+	    return 1;
+	}
     }
 
     switch (mode) {
@@ -241,9 +291,9 @@ int main(int argc, char ** argv) {
 	    g_error_free (error);
 	}
 	if (animate)
-	    animation_render_main (map, animation, outputFile, target_density);
+	    animation_render_main (map, animation, outputFile, quality);
 	else
-	    batch_image_render (map, outputFile, target_density);
+	    batch_image_render (map, outputFile, quality);
 	break;
     }
 
@@ -253,13 +303,7 @@ int main(int argc, char ** argv) {
 	    acquire_console();
 	}
 	else {
-#  ifdef HAVE_FORK
-	    /* FIXME: Don't assume HAVE_FORK means that daemon() will work */
-	    if (daemon(0, 0) < 0) {
-		perror("daemon");
-		return 1;
-	    }
-#  endif
+	    daemonize_to_pidfile(pidfile);
 	}
 	if (!hidden)
 	    discovery_server_new(FYRE_DEFAULT_SERVICE, port_number);
@@ -300,7 +344,7 @@ int main(int argc, char ** argv) {
 static void usage(char **argv) {
     acquire_console();
     fprintf(stderr,
-	    "Usage: %s [options]\n"
+	    "Usage: %s [options] [file]\n"
 	    "Interactive exploration and high quality rendering of chaotic maps\n"
 	    "\n"
 	    "Actions:\n"
@@ -311,20 +355,24 @@ static void usage(char **argv) {
 	    "  -o, --output FILE       Instead of presenting an interactive GUI, render\n"
 	    "                            an image or animation with the provided settings\n"
 	    "                            noninteractively, and store it in FILE.\n"
+	    "  -h, --help              Display this text.\n"
+	    "  --version               Show the version number and exit.\n"
 	    "\n"
 	    "Clustering:\n"
-	    "  -c LIST, --cluster LIST Use a rendering cluster, specified as a comma-separated\n"
-	    "                            list of hostnames, optionally of the form host:port.\n"
+	    "  -c. --cluster LIST      Use a rendering cluster, given as a comma-separated\n"
+	    "                            list of hosts, optionally of the form host:port.\n"
 	    "  -C, --auto-cluster      Automatically search for cluster nodes, adding them\n"
-            "                            as they become available."
+            "                            as they become available.\n"
 	    "  -r, --remote            Remote control mode. Fyre will listen by default on\n"
 	    "                            port 7931 for commands, and can act as a rendering\n"
 	    "                            server in a cluster.\n"
-	    "  -P N, --port N          Set the TCP port number used for remote control mode.\n"
+	    "  -P, --port N            Set the TCP port number used for remote control mode.\n"
 	    "  -v, --verbose           In remote control mode, display status messages on the\n"
 	    "                            console and don't run as a daemon.\n"
 	    "  --hidden                In remote control mode, don't reply to broadcast\n"
 	    "                            requests for detecting available Fyre servers.\n"
+	    "  --pidfile FILE          When running in the background under a UNIX-like OS,\n"
+	    "                            save the new process ID to this file.\n"
 	    "\n"
 	    "Parameters:\n"
 	    "  -p, --param KEY=VALUE   Set a calculation or rendering parameter, using the\n"
@@ -340,22 +388,25 @@ static void usage(char **argv) {
 	    "                            edges on most images, but will increase memory usage\n"
 	    "                            quadratically. Recommended values are between 1\n"
 	    "                            (no oversampling) and 4 (heavy oversampling)\n"
-	    "  -t, --density DENSITY   In noninteractive rendering, set the peak density\n"
-	    "                            to stop rendering at. Larger numbers give smoother\n"
-	    "                            and more detailed results, but increase running time\n"
-	    "                            linearly\n",
+	    "  -q, --quality QUALITY   In noninteractive rendering, set the quality level at\n"
+	    "                            which we stop rendering. Larger numbers give\n"
+	    "                            smoother and more detailed results, but increase\n"
+	    "                            running time. The default of 1.0 gives roughly one\n"
+	    "                            histogram sample for every final image sample.\n",
 	    argv[0]);
 }
 
 static void animation_render_main (IterativeMap *map,
 				   Animation    *animation,
 				   const gchar  *filename,
-				   gulong       target_density) {
+				   double        quality) {
     const double frame_rate = 24;
     AnimationIter iter;
     ParameterHolderPair frame;
     guint frame_count = 0;
     gboolean continuation;
+    double current_quality;
+
     AviWriter *avi = avi_writer_new(fopen(filename, "wb"),
 				    HISTOGRAM_IMAGER(map)->width,
 				    HISTOGRAM_IMAGER(map)->height,
@@ -369,17 +420,29 @@ static void animation_render_main (IterativeMap *map,
 
 	continuation = FALSE;
 	do {
-	    iterative_map_calculate_motion(map, 100000, continuation,
-					   PARAMETER_INTERPOLATOR(parameter_holder_interpolate_linear),
-					   &frame);
-	    printf("Frame %d, %e iterations, %ld density\n", frame_count,
-		   map->iterations, HISTOGRAM_IMAGER(map)->peak_density);
-	    continuation = TRUE;
-	} while (HISTOGRAM_IMAGER(map)->peak_density < target_density);
+	    /* Calculate 0.5 seconds between quality updates. This is lower than the
+	     * batch image rendering default of 2.0 seconds, to better handle
+	     * lower-quality animations where the individual frames go quicker.
+	     */
+	    iterative_map_calculate_motion_timed(map, 0.5, continuation,
+						 PARAMETER_INTERPOLATOR(parameter_holder_interpolate_linear),
+						 &frame);
+	    current_quality = histogram_imager_compute_quality(HISTOGRAM_IMAGER(map));
 
+	    printf("\rFrame %d, %e iterations, %.04f quality", frame_count,
+		   map->iterations, current_quality);
+	    fflush(stdout);
+
+	    continuation = TRUE;
+	} while (current_quality < quality);
 
 	histogram_imager_update_image(HISTOGRAM_IMAGER(map));
 	avi_writer_append_frame(avi, HISTOGRAM_IMAGER(map)->image);
+
+	/* Move to the next line for each frame.
+	 * Updates within a frame overwrite that line.
+	 */
+	printf("\n");
 
 	frame_count++;
     }
@@ -387,12 +450,64 @@ static void animation_render_main (IterativeMap *map,
     avi_writer_close(avi);
 }
 
+
+/* Daemonize this process, saving the new PID to a file if a name
+ * is specified. No pidfile is written if the filename is NULL.
+ */
+#ifdef HAVE_GNET
+#ifdef HAVE_FORK
+static void daemonize_to_pidfile(const char* filename)
+{
+    FILE* f = NULL;
+
+    if (filename) {
+	/* Open the file before our current directory and console disappear */
+	f = fopen(filename, "w");
+	if (!f)
+	    printf("Can't open pidfile '%s'\n", filename);
+    }
+
+    if (daemon(0, 0) < 0) {
+	perror("daemon");
+	exit(1);
+    }
+
+    if (f) {
+	fprintf(f, "%d", getpid());
+	fclose(f);
+    }
+}
+#else
+static void daemonize_to_pidfile(const char* filename) {}
+#endif /* HAVE_FORK */
+#endif /* HAVE_GNET */
+
+
 #ifdef WIN32
+static int console_running = 1;
+
 void sleep_at_exit()
 {
     printf("\nFinished.\n");
-    while (1)
-	sleep(10);
+    while (console_running) {
+        Sleep(100);
+        fgetc(stdin);
+    }
+}
+
+BOOL console_control_handler(DWORD control_type)
+{
+    switch (control_type) {
+
+    case CTRL_C_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        console_running = 0;
+        break;
+
+    }
+    return FALSE;
 }
 
 static void acquire_console()
@@ -413,6 +528,7 @@ static void acquire_console()
     *stdout = *file;
     *stderr = *file;
 
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE) console_control_handler, TRUE);
     atexit(sleep_at_exit);
 }
 #else

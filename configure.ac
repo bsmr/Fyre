@@ -3,7 +3,7 @@ dnl Process this file with autoconf to create configure.
 dnl ################################################################
 dnl # Initialize autoconf
 dnl ################################################################
-AC_INIT(fyre, 0.9, trowbrds@cs.colorado.edu)
+AC_INIT(fyre, 1.0.0, trowbrds@cs.colorado.edu)
 AC_PREREQ(2.50)
 AC_CONFIG_SRCDIR(config.h.in)
 AC_COPYRIGHT([Copyright 2004-2005 David Trowbridge and Micah Dowty])
@@ -11,7 +11,7 @@ AC_COPYRIGHT([Copyright 2004-2005 David Trowbridge and Micah Dowty])
 dnl ################################################################
 dnl # Initialize automake
 dnl ################################################################
-VERSION=0.9
+VERSION=1.0.0
 PACKAGE=fyre
 AM_INIT_AUTOMAKE($PACKAGE, $VERSION)
 
@@ -126,6 +126,7 @@ dnl # Output the Makefiles
 dnl ################################################################
 AC_CONFIG_FILES([
 Makefile
+autopackage/default.apspec
 data/Makefile
 src/Makefile
 contrib/Makefile
