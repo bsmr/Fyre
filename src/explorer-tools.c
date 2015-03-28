@@ -2,7 +2,7 @@
  * explorer-tools.c - Implementation for the GUI 'tools' that allow
  *                    direct interaction with the mouse.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -22,31 +22,16 @@
  */
 
 #include "explorer.h"
+#include "de-jong.h"
 #include <stdlib.h>
-#include <math.h>
-
-
-typedef struct _ToolInput {
-  double delta_x, delta_y;
-  double absolute_x, absolute_y;
-  double click_relative_x, click_relative_y;
-  double delta_time;
-  GdkModifierType state;
-} ToolInput;
 
 typedef void (ToolHandler)(Explorer *self, ToolInput *i);
-
-typedef enum {
-  TOOL_USE_MOTION_EVENTS = 1 << 0,
-  TOOL_USE_IDLE          = 1 << 1,
-} ToolFlags;
 
 typedef struct _ToolInfo {
   gchar *menu_name;
   ToolHandler *handler;
   ToolFlags flags;
 } ToolInfo;
-
 
 static const ToolInfo* explorer_get_current_tool(Explorer *self);
 static void explorer_fill_toolinput_relative_positions(Explorer *self, ToolInput *ti);
@@ -69,6 +54,8 @@ static void tool_b_d(Explorer *self, ToolInput *i);
 static void tool_c_d(Explorer *self, ToolInput *i);
 static void tool_ab_cd(Explorer *self, ToolInput *i);
 static void tool_ac_bd(Explorer *self, ToolInput *i);
+static void tool_initial_offset(Explorer *self, ToolInput *i);
+static void tool_initial_scale(Explorer *self, ToolInput *i);
 
 
 /* A table of tool handlers and menu item names */
@@ -87,6 +74,8 @@ static const ToolInfo tool_table[] = {
   {"tool_c_d",            tool_c_d,            TOOL_USE_MOTION_EVENTS},
   {"tool_ab_cd",          tool_ab_cd,          TOOL_USE_MOTION_EVENTS},
   {"tool_ac_bd",          tool_ac_bd,          TOOL_USE_MOTION_EVENTS},
+  {"tool_initial_offset", tool_initial_offset, TOOL_USE_MOTION_EVENTS},
+  {"tool_initial_scale",  tool_initial_scale,  TOOL_USE_MOTION_EVENTS},
 
   {NULL,},
 };
@@ -201,6 +190,7 @@ static gboolean on_button_press(GtkWidget *widget, GdkEvent *event, gpointer use
 static gboolean on_button_release(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
   Explorer *self = EXPLORER(user_data);
   self->tool_active = FALSE;
+  return FALSE;
 }
 
 gboolean explorer_update_tools(Explorer *self) {
@@ -239,17 +229,17 @@ gboolean explorer_update_tools(Explorer *self) {
 /************************************************************************************/
 
 static void tool_grab(Explorer *self, ToolInput *i) {
-  double scale = 5.0 / self->dejong->zoom / HISTOGRAM_IMAGER(self->dejong)->width;
-  g_object_set(self->dejong,
-	       "xoffset", self->dejong->xoffset + i->delta_x * scale,
-	       "yoffset", self->dejong->yoffset + i->delta_y * scale,
+  double scale = 5.0 / DE_JONG(self->map)->zoom / HISTOGRAM_IMAGER(self->map)->width;
+  g_object_set(self->map,
+	       "xoffset", DE_JONG(self->map)->xoffset + i->delta_x * scale,
+	       "yoffset", DE_JONG(self->map)->yoffset + i->delta_y * scale,
 	       NULL);
 }
 
 static void tool_blur(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "blur_ratio",  self->dejong->blur_ratio  + i->delta_x * 0.002,
-	       "blur_radius", self->dejong->blur_radius - i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "blur_ratio",  DE_JONG(self->map)->blur_ratio  + i->delta_x * 0.002,
+	       "blur_radius", DE_JONG(self->map)->blur_radius - i->delta_y * 0.001,
 	       NULL);
 }
 
@@ -266,81 +256,104 @@ static void tool_zoom(Explorer *self, ToolInput *i) {
     scaled_p = pow(p, exponent);
   }
 
-  g_object_set(self->dejong,
-	       "zoom", self->dejong->zoom - scaled_p * i->delta_time,
+  g_object_set(self->map,
+	       "zoom", DE_JONG(self->map)->zoom - scaled_p * i->delta_time,
 	       NULL);
 }
 
 static void tool_rotate(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "rotation", (gdouble) (self->dejong->rotation - i->delta_x * 0.0089),
+  /* We're a bit tricky here and also rotate the X and Y offset such that we're
+   * rotating around the center of the view, rather than rotating around the
+   * center of rendering coordinates.
+   */
+  double delta_r = -i->delta_x * 0.0089;
+  double sin_d_r = sin(delta_r);
+  double cos_d_r = cos(delta_r);
+  g_object_set(self->map,
+	       "rotation", (gdouble) (DE_JONG(self->map)->rotation + delta_r),
+	       "xoffset",  (gdouble) ( cos_d_r * DE_JONG(self->map)->xoffset + sin_d_r * DE_JONG(self->map)->yoffset),
+	       "yoffset",  (gdouble) (-sin_d_r * DE_JONG(self->map)->xoffset + cos_d_r * DE_JONG(self->map)->yoffset),
 	       NULL);
 }
 
 static void tool_exposure_gamma(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "exposure", HISTOGRAM_IMAGER(self->dejong)->exposure - i->delta_y * 0.001,
-	       "gamma",    HISTOGRAM_IMAGER(self->dejong)->gamma    + i->delta_x * 0.001,
+  g_object_set(self->map,
+	       "exposure", HISTOGRAM_IMAGER(self->map)->exposure - i->delta_y * 0.001,
+	       "gamma",    HISTOGRAM_IMAGER(self->map)->gamma    + i->delta_x * 0.001,
 	       NULL);
 }
 
 static void tool_a_b(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "a", self->dejong->param.a + i->delta_x * 0.001,
-	       "b", self->dejong->param.b + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "a", DE_JONG(self->map)->param.a + i->delta_x * 0.001,
+	       "b", DE_JONG(self->map)->param.b + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_a_c(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "a", self->dejong->param.a + i->delta_x * 0.001,
-	       "c", self->dejong->param.c + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "a", DE_JONG(self->map)->param.a + i->delta_x * 0.001,
+	       "c", DE_JONG(self->map)->param.c + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_a_d(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "a", self->dejong->param.a + i->delta_x * 0.001,
-	       "d", self->dejong->param.d + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "a", DE_JONG(self->map)->param.a + i->delta_x * 0.001,
+	       "d", DE_JONG(self->map)->param.d + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_b_c(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "b", self->dejong->param.b + i->delta_x * 0.001,
-	       "c", self->dejong->param.c + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "b", DE_JONG(self->map)->param.b + i->delta_x * 0.001,
+	       "c", DE_JONG(self->map)->param.c + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_b_d(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "b", self->dejong->param.b + i->delta_x * 0.001,
-	       "d", self->dejong->param.d + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "b", DE_JONG(self->map)->param.b + i->delta_x * 0.001,
+	       "d", DE_JONG(self->map)->param.d + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_c_d(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "c", self->dejong->param.c + i->delta_x * 0.001,
-	       "d", self->dejong->param.d + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "c", DE_JONG(self->map)->param.c + i->delta_x * 0.001,
+	       "d", DE_JONG(self->map)->param.d + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_ab_cd(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "a", self->dejong->param.a + i->delta_x * 0.001,
-	       "b", self->dejong->param.b + i->delta_x * 0.001,
-	       "c", self->dejong->param.c + i->delta_y * 0.001,
-	       "d", self->dejong->param.d + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "a", DE_JONG(self->map)->param.a + i->delta_x * 0.001,
+	       "b", DE_JONG(self->map)->param.b + i->delta_x * 0.001,
+	       "c", DE_JONG(self->map)->param.c + i->delta_y * 0.001,
+	       "d", DE_JONG(self->map)->param.d + i->delta_y * 0.001,
 	       NULL);
 }
 
 static void tool_ac_bd(Explorer *self, ToolInput *i) {
-  g_object_set(self->dejong,
-	       "a", self->dejong->param.a + i->delta_x * 0.001,
-	       "b", self->dejong->param.b + i->delta_y * 0.001,
-	       "c", self->dejong->param.c + i->delta_x * 0.001,
-	       "d", self->dejong->param.d + i->delta_y * 0.001,
+  g_object_set(self->map,
+	       "a", DE_JONG(self->map)->param.a + i->delta_x * 0.001,
+	       "b", DE_JONG(self->map)->param.b + i->delta_y * 0.001,
+	       "c", DE_JONG(self->map)->param.c + i->delta_x * 0.001,
+	       "d", DE_JONG(self->map)->param.d + i->delta_y * 0.001,
+	       NULL);
+}
+
+static void tool_initial_offset(Explorer *self, ToolInput *i) {
+  g_object_set(self->map,
+	       "initial_xoffset", DE_JONG(self->map)->initial_xoffset + i->delta_x * 0.001,
+	       "initial_yoffset", DE_JONG(self->map)->initial_yoffset + i->delta_y * 0.001,
+	       NULL);
+}
+
+static void tool_initial_scale(Explorer *self, ToolInput *i) {
+  g_object_set(self->map,
+	       "initial_xscale", DE_JONG(self->map)->initial_xscale + i->delta_x * 0.001,
+	       "initial_yscale", DE_JONG(self->map)->initial_yscale - i->delta_y * 0.001,
 	       NULL);
 }
 

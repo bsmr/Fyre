@@ -2,7 +2,7 @@
  * de-jong.c - The DeJong object builds on the ParameterHolder and HistogramRender
  *             objects to provide a rendering of the DeJong map into a histogram image.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -32,25 +32,100 @@ static void de_jong_init_calc_params(GObjectClass *object_class);
 static void de_jong_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void de_jong_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 static void de_jong_reset_calc(DeJong *self);
+static void de_jong_calculate(IterativeMap *self, guint iterations);
+static void de_jong_calculate_motion(IterativeMap *self, guint iterations, gboolean continuation, ParameterInterpolator *interp, gpointer interp_data);
+static ToolInfoPH *de_jong_get_tools();
 
 static void update_double_if_necessary(gdouble new_value, gboolean *dirty_flag, gdouble *param, gdouble epsilon);
 static void update_boolean_if_necessary(gboolean new_value, gboolean *dirty_flag, gboolean *param);
 
 enum {
   PROP_0,
+  PROP_FUNCTION,
   PROP_A,
   PROP_B,
   PROP_C,
   PROP_D,
   PROP_ZOOM,
+  PROP_ASPECT,
   PROP_XOFFSET,
   PROP_YOFFSET,
   PROP_ROTATION,
   PROP_BLUR_RADIUS,
   PROP_BLUR_RATIO,
   PROP_TILEABLE,
+  PROP_EMPHASIZE_TRANSIENT,
+  PROP_TRANSIENT_ITERATIONS,
+  PROP_INITIAL_CONDITIONS,
+  PROP_INITIAL_XSCALE,
+  PROP_INITIAL_YSCALE,
+  PROP_INITIAL_XOFFSET,
+  PROP_INITIAL_YOFFSET,
 };
 
+typedef void (*initial_conditions_t)(gdouble *x, gdouble *y);
+
+void initial_func_square_uniform    (gdouble *x, gdouble *y);
+void initial_func_gaussian          (gdouble *x, gdouble *y);
+void initial_func_circular_uniform  (gdouble *x, gdouble *y);
+void initial_func_radial            (gdouble *x, gdouble *y);
+void initial_func_sphere            (gdouble *x, gdouble *y);
+
+static const
+GEnumValue initial_conditions_enum[] =
+{
+  { 0, "circular_uniform",  "Circular uniform"  },
+  { 1, "square_uniform",    "Square uniform"    },
+  { 2, "gaussian",          "Gaussian"          },
+  { 3, "radial",            "Radial"            },
+  { 4, "sphere",            "Sphere"            },
+  { 0 },
+};
+
+static const
+initial_conditions_t initial_conditions_table[] =
+{
+  initial_func_circular_uniform,
+  initial_func_square_uniform,
+  initial_func_gaussian,
+  initial_func_radial,
+  initial_func_sphere,
+};
+
+static GType initial_conditions_enum_get_type(void);
+
+static void tool_grab(ParameterHolder *self, ToolInput *i);
+static void tool_blur(ParameterHolder *self, ToolInput *i);
+static void tool_zoom(ParameterHolder *self, ToolInput *i);
+static void tool_rotate(ParameterHolder *self, ToolInput *i);
+static void tool_exposure_gamma(ParameterHolder *self, ToolInput *i);
+static void tool_a_b(ParameterHolder *self, ToolInput *i);
+static void tool_a_c(ParameterHolder *self, ToolInput *i);
+static void tool_a_d(ParameterHolder *self, ToolInput *i);
+static void tool_b_c(ParameterHolder *self, ToolInput *i);
+static void tool_b_d(ParameterHolder *self, ToolInput *i);
+static void tool_c_d(ParameterHolder *self, ToolInput *i);
+static void tool_ab_cd(ParameterHolder *self, ToolInput *i);
+static void tool_ac_bd(ParameterHolder *self, ToolInput *i);
+
+static const ToolInfoPH tool_table[] = {
+  {"Grab",        tool_grab,           TOOL_USE_MOTION_EVENTS},
+  {"Blur",        tool_blur,           TOOL_USE_MOTION_EVENTS},
+  {"Zoom",        tool_zoom,           TOOL_USE_IDLE},
+  {"Rotate",      tool_rotate,         TOOL_USE_MOTION_EVENTS},
+  {"Gamma",       tool_exposure_gamma, TOOL_USE_MOTION_EVENTS},
+  {"<separator>",},
+  {"A / B",       tool_a_b,            TOOL_USE_MOTION_EVENTS},
+  {"A / C",       tool_a_c,            TOOL_USE_MOTION_EVENTS},
+  {"A / D",       tool_a_d,            TOOL_USE_MOTION_EVENTS},
+  {"B / C",       tool_b_c,            TOOL_USE_MOTION_EVENTS},
+  {"B / D",       tool_b_d,            TOOL_USE_MOTION_EVENTS},
+  {"C / D",       tool_c_d,            TOOL_USE_MOTION_EVENTS},
+  {"<separator>",},
+  {"AB / CD",     tool_ab_cd,          TOOL_USE_MOTION_EVENTS},
+  {"AC / BD",     tool_ac_bd,          TOOL_USE_MOTION_EVENTS},
+  {NULL,},
+};
 
 /************************************************************************************/
 /**************************************************** Initialization / Finalization */
@@ -72,18 +147,37 @@ GType de_jong_get_type(void) {
       (GInstanceInitFunc) de_jong_init,
     };
 
-    dj_type = g_type_register_static(HISTOGRAM_IMAGER_TYPE, "DeJong", &dj_info, 0);
+    dj_type = g_type_register_static(ITERATIVE_MAP_TYPE, "DeJong", &dj_info, 0);
   }
 
   return dj_type;
 }
 
+static GType initial_conditions_enum_get_type(void) {
+  static GType t = 0;
+
+  if (!t)
+    t = g_enum_register_static ("InitialConditions", initial_conditions_enum);
+
+  return t;
+}
+
 static void de_jong_class_init(DeJongClass *klass) {
   GObjectClass *object_class;
+  IterativeMapClass *im_class;
+  ParameterHolderClass *ph_class;
+
   object_class = (GObjectClass*) klass;
+  im_class = (IterativeMapClass*) klass;
+  ph_class = (ParameterHolderClass*) klass;
 
   object_class->set_property = de_jong_set_property;
   object_class->get_property = de_jong_get_property;
+
+  im_class->calculate = de_jong_calculate;
+  im_class->calculate_motion = de_jong_calculate_motion;
+
+  ph_class->get_tools = de_jong_get_tools;
 
   de_jong_init_calc_params(object_class);
 }
@@ -91,6 +185,13 @@ static void de_jong_class_init(DeJongClass *klass) {
 static void de_jong_init_calc_params(GObjectClass *object_class) {
   GParamSpec *spec;
   const gchar *current_group = "Computation";
+
+  spec = g_param_spec_string       ("function",
+                                    "Function",
+				    "Function Name",
+				    "Peter de Jong Map",
+				    G_PARAM_READABLE);
+  g_object_class_install_property  (object_class, PROP_FUNCTION, spec);
 
   spec = g_param_spec_double       ("a",
 				    "A",
@@ -135,12 +236,22 @@ static void de_jong_init_calc_params(GObjectClass *object_class) {
   spec = g_param_spec_double       ("zoom",
 				    "Zoom",
 				    "Zoom factor",
-				    0.2, 1000, 1,
+				    0.01, 1000, 1,
 				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
 				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
   param_spec_set_group             (spec, current_group);
   param_spec_set_increments        (spec, 0.01, 0.1, 3);
   g_object_class_install_property  (object_class, PROP_ZOOM, spec);
+
+  spec = g_param_spec_double       ("aspect",
+				    "Aspect",
+				    "Aspect ratio",
+				    0.01, 100, 1,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 0.001, 0.1, 3);
+  g_object_class_install_property  (object_class, PROP_ASPECT, spec);
 
   spec = g_param_spec_double       ("xoffset",
 				    "X offset",
@@ -200,6 +311,81 @@ static void de_jong_init_calc_params(GObjectClass *object_class) {
 				    PARAM_INTERPOLATE | PARAM_IN_GUI);
   param_spec_set_group             (spec, current_group);
   g_object_class_install_property  (object_class, PROP_TILEABLE, spec);
+
+  spec = g_param_spec_boolean      ("emphasize_transient",
+				    "Emphasize transient",
+				    "Re-randomize the point periodically to emphasize transients",
+				    FALSE,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  g_object_class_install_property  (object_class, PROP_EMPHASIZE_TRANSIENT, spec);
+
+  spec = g_param_spec_uint         ("transient_iterations",
+				    "Transient iterations",
+				    "Number of iterations between re-randomization, when 'Emphasize transient' is enabled",
+				    1, 100000, 50,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 1, 10, 0);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_TRANSIENT_ITERATIONS, spec);
+
+  spec = g_param_spec_enum         ("initial_conditions",
+				    "Initial conditions",
+				    "Selects the function used to generate initial conditions, when 'Emphasize transient' is enabled",
+				    initial_conditions_enum_get_type(),
+				    0,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_INITIAL_CONDITIONS, spec);
+
+  spec = g_param_spec_double       ("initial_xscale",
+				    "Initial X scale",
+				    "Horizontal initial condition scale factor",
+				    0, 1000, 1,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 0.001, 0.01, 3);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_INITIAL_XSCALE, spec);
+
+  spec = g_param_spec_double       ("initial_yscale",
+				    "Initial Y scale",
+				    "Vertical initial condition scale factor",
+				    0, 1000, 1,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 0.001, 0.01, 3);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_INITIAL_YSCALE, spec);
+
+  spec = g_param_spec_double       ("initial_xoffset",
+				    "Initial X offset",
+				    "Horizontal initial condition offset",
+				    -100, 100, 0,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 0.001, 0.01, 3);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_INITIAL_XOFFSET, spec);
+
+  spec = g_param_spec_double       ("initial_yoffset",
+				    "Initial Y offset",
+				    "Vertical initial condition offset",
+				    -100, 100, 0,
+				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT | PARAM_SERIALIZED |
+				    G_PARAM_LAX_VALIDATION | PARAM_INTERPOLATE | PARAM_IN_GUI);
+  param_spec_set_group             (spec, current_group);
+  param_spec_set_increments        (spec, 0.001, 0.01, 3);
+  param_spec_set_dependency        (spec, "emphasize-transient");
+  g_object_class_install_property  (object_class, PROP_INITIAL_YOFFSET, spec);
 }
 
 static void de_jong_init(DeJong *self) {
@@ -229,6 +415,21 @@ static void update_boolean_if_necessary(gboolean new_value, gboolean *dirty_flag
   }
 }
 
+static void update_uint_if_necessary(guint new_value, gboolean *dirty_flag, guint *param) {
+  if (new_value != *param) {
+    *param = new_value;
+    *dirty_flag = TRUE;
+  }
+}
+
+static void update_enum_if_necessary(gint new_value, gboolean *dirty_flag, gint *param) {
+  if (new_value != *param) {
+    *param = new_value;
+    *dirty_flag = TRUE;
+  }
+}
+
+
 static void de_jong_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec) {
   DeJong *self = DE_JONG(object);
 
@@ -254,6 +455,10 @@ static void de_jong_set_property (GObject *object, guint prop_id, const GValue *
     update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->zoom, 0.0009);
     break;
 
+  case PROP_ASPECT:
+    update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->aspect, 0.0009);
+    break;
+
   case PROP_XOFFSET:
     update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->xoffset, 0.000001);
     break;
@@ -276,6 +481,34 @@ static void de_jong_set_property (GObject *object, guint prop_id, const GValue *
 
   case PROP_TILEABLE:
     update_boolean_if_necessary(g_value_get_boolean(value), &self->calc_dirty_flag, &self->tileable);
+    break;
+
+  case PROP_EMPHASIZE_TRANSIENT:
+    update_boolean_if_necessary(g_value_get_boolean(value), &self->calc_dirty_flag, &self->emphasize_transient);
+    break;
+
+  case PROP_TRANSIENT_ITERATIONS:
+    update_uint_if_necessary(g_value_get_uint(value), &self->calc_dirty_flag, &self->transient_iterations);
+    break;
+
+  case PROP_INITIAL_CONDITIONS:
+    update_enum_if_necessary(g_value_get_enum(value), &self->calc_dirty_flag, &self->initial_conditions);
+    break;
+
+  case PROP_INITIAL_XOFFSET:
+    update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->initial_xoffset, 0.000001);
+    break;
+
+  case PROP_INITIAL_YOFFSET:
+    update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->initial_yoffset, 0.000001);
+    break;
+
+  case PROP_INITIAL_XSCALE:
+    update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->initial_xscale, 0.0009);
+    break;
+
+  case PROP_INITIAL_YSCALE:
+    update_double_if_necessary(g_value_get_double(value), &self->calc_dirty_flag, &self->initial_yscale, 0.0009);
     break;
 
   default:
@@ -309,6 +542,10 @@ static void de_jong_get_property (GObject *object, guint prop_id, GValue *value,
     g_value_set_double(value, self->zoom);
     break;
 
+  case PROP_ASPECT:
+    g_value_set_double(value, self->aspect);
+    break;
+
   case PROP_XOFFSET:
     g_value_set_double(value, self->xoffset);
     break;
@@ -333,6 +570,34 @@ static void de_jong_get_property (GObject *object, guint prop_id, GValue *value,
     g_value_set_boolean(value, self->tileable);
     break;
 
+  case PROP_EMPHASIZE_TRANSIENT:
+    g_value_set_boolean(value, self->emphasize_transient);
+    break;
+
+  case PROP_TRANSIENT_ITERATIONS:
+    g_value_set_uint(value, self->transient_iterations);
+    break;
+
+  case PROP_INITIAL_CONDITIONS:
+    g_value_set_enum(value, self->initial_conditions);
+    break;
+
+  case PROP_INITIAL_XOFFSET:
+    g_value_set_double(value, self->initial_xoffset);
+    break;
+
+  case PROP_INITIAL_YOFFSET:
+    g_value_set_double(value, self->initial_yoffset);
+    break;
+
+  case PROP_INITIAL_XSCALE:
+    g_value_set_double(value, self->initial_xscale);
+    break;
+
+  case PROP_INITIAL_YSCALE:
+    g_value_set_double(value, self->initial_yscale);
+    break;
+
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     break;
@@ -344,8 +609,9 @@ static void de_jong_get_property (GObject *object, guint prop_id, GValue *value,
 /********************************************************************** Calculation */
 /************************************************************************************/
 
-void de_jong_calculate(DeJong *self, guint iterations) {
+void de_jong_calculate(IterativeMap *map, guint iterations) {
   /* Copy frequently used parameters to local variables */
+  DeJong *self = DE_JONG(map);
   const gboolean tileable = self->tileable;
   const DeJongParams param = self->param;
 
@@ -356,6 +622,9 @@ void de_jong_calculate(DeJong *self, guint iterations) {
   /* Toggles to disable features that aren't needed */
   const gboolean rotation_enabled = self->rotation > 0.0001 || self->rotation < -0.0001;
   const gboolean blur_enabled = self->blur_ratio > 0.0001 && self->blur_radius > 0.00001;
+  const gboolean aspect_enabled = self->aspect > 1.0001 || self->aspect < 0.9999;
+  const gboolean matrix_enabled = aspect_enabled || rotation_enabled;
+  const gboolean emphasize_transient = self->emphasize_transient;
 
   /* Blurring variables */
   int blur_table_size;
@@ -363,13 +632,15 @@ void de_jong_calculate(DeJong *self, guint iterations) {
   int blur_index, blur_ratio_index, blur_ratio_threshold;
   float *blur_table;
 
-  /* Rotation variables */
-  double sine_rotation, cosine_rotation;
+  /* Rotation/aspect matrix variables */
+  double sine_rotation, cosine_rotation, mat_a, mat_b, mat_c, mat_d;
 
   /* Iteration and projection variables */
   double x, y, point_x, point_y;
   double scale, xcenter, ycenter;
   int i, ix, iy;
+  guint remaining_transient_iterations;
+  initial_conditions_t initial_func;
 
   /* Reset calculation if we need to */
   if (self->calc_dirty_flag || HISTOGRAM_IMAGER(self)->histogram_clear_flag)
@@ -384,10 +655,22 @@ void de_jong_calculate(DeJong *self, guint iterations) {
   xcenter = hist_width / 2.0 + self->xoffset * scale;
   ycenter = hist_height / 2.0 + self->yoffset * scale;
 
-  /* Precalculate the sine and cosine of the rotation angle, if we'll need it */
-  if (rotation_enabled) {
-    sine_rotation = sin(self->rotation);
-    cosine_rotation = cos(self->rotation);
+  /* Set up the matrix used for rotation and aspect ratio adjustment */
+  if (matrix_enabled) {
+    if (rotation_enabled) {
+      sine_rotation = sin(self->rotation);
+      cosine_rotation = cos(self->rotation);
+      mat_a = cosine_rotation * self->aspect;
+      mat_b = sine_rotation / self->aspect;
+      mat_c = -sine_rotation * self->aspect;
+      mat_d = cosine_rotation / self->aspect;
+    }
+    else {
+      mat_a = self->aspect;
+      mat_b = 0;
+      mat_c = 0;
+      mat_d = 1/self->aspect;
+    }
   }
 
   /* Initialize the blur table with a set of precalculated normally distributed
@@ -415,22 +698,51 @@ void de_jong_calculate(DeJong *self, guint iterations) {
 
   point_x = self->point_x;
   point_y = self->point_y;
+  remaining_transient_iterations = self->remaining_transient_iterations;
+  initial_func = initial_conditions_table[self->initial_conditions];
 
   for(i=iterations; i; --i) {
+
+    /* If transient emphasis is enabled, we periodically re-randomize
+     * the point. When remaining_transient_iterations hits zero, we
+     * re-randomize and set it back to the transient iteration count
+     * set by the user.
+     */
+    if (emphasize_transient) {
+      if (remaining_transient_iterations) {
+	remaining_transient_iterations--;
+      }
+      else {
+	remaining_transient_iterations = self->transient_iterations-1;
+	initial_func(&point_x, &point_y);
+	point_x = self->initial_xscale * point_x + self->initial_xoffset;
+	point_y = self->initial_yscale * point_y + self->initial_yoffset;
+      }
+    }
+
     /* These are the actual Peter de Jong map equations. The new point value
      * gets stored into 'point', then we go on and mess with x and y before plotting.
      */
     x = sin(param.a * point_y) - cos(param.b * point_x);
     y = sin(param.c * point_x) - cos(param.d * point_y);
+    /*
+    x = sin(param.a * point_y) + param.c * cos(param.a * point_x);
+    y = sin(param.b * point_x) + param.d * cos(param.b * point_y);
+    */
+    /*
+    x = sin(param.a * point_y) - tanh(param.b * point_x);
+    y = sin(param.c * point_x) - tanh(param.d * point_y);
+    */
+    /*
+    x = sin(point_y * param.b) + param.c * sin(point_x * param.b);
+    y = sin(point_x * param.a) + param.d * sin(point_y * param.a);
+    */
     point_x = x;
     point_y = y;
 
-    /* If rotation is enabled, rotate each point around
-     * the origin by self->rotation radians.
-     */
-    if (rotation_enabled) {
-      x =  cosine_rotation * point_x + sine_rotation   * point_y;
-      y = -sine_rotation   * point_x + cosine_rotation * point_y;
+    if (matrix_enabled) {
+      x = point_x * mat_a + point_y * mat_b;
+      y = point_x * mat_c + point_y * mat_d;
     }
 
     /* If blurring is enabled, use blur_ratio to decide how often to perturb
@@ -487,12 +799,13 @@ void de_jong_calculate(DeJong *self, guint iterations) {
   }
 
   histogram_imager_finish_plots(HISTOGRAM_IMAGER(self), &plot);
-  self->iterations += iterations;
+  ITERATIVE_MAP(self)->iterations += iterations;
   self->point_x = point_x;
   self->point_y = point_y;
+  self->remaining_transient_iterations = remaining_transient_iterations;
 }
 
-void de_jong_calculate_motion(DeJong               *self,
+void de_jong_calculate_motion(IterativeMap         *self,
 			      guint                 iterations,
 			      gboolean              continuation,
 			      ParameterInterpolator *interp,
@@ -511,7 +824,7 @@ void de_jong_calculate_motion(DeJong               *self,
 
   for (count=0; count<iterations; count+=blocksize) {
     interp(PARAMETER_HOLDER(self), uniform_variate(), interp_data);
-    self->calc_dirty_flag = !continuation;
+    DE_JONG(self)->calc_dirty_flag = !continuation;
     de_jong_calculate(self, blocksize);
   }
 }
@@ -519,14 +832,107 @@ void de_jong_calculate_motion(DeJong               *self,
 static void de_jong_reset_calc(DeJong *self) {
   /* Reset the histogram and calculation state */
   histogram_imager_clear(HISTOGRAM_IMAGER(self));
-  self->iterations = 0;
+  ITERATIVE_MAP(self)->iterations = 0;
+  self->remaining_transient_iterations = 0;
 
-  /* Random starting point */
+  /* Random starting point, use a simple uniform variate
+   * for this. We have more complex initial condition controls
+   * we use when emphasize_transient is on, but when it's off
+   * the initial conditions have no effect on the image as iterations
+   * approach infinity.
+   */
   self->point_x = uniform_variate();
   self->point_y = uniform_variate();
 
   HISTOGRAM_IMAGER(self)->histogram_clear_flag = FALSE;
   self->calc_dirty_flag = FALSE;
 }
+
+
+/************************************************************************************/
+/*************************************************************** Initial Conditions */
+/************************************************************************************/
+
+void initial_func_square_uniform (gdouble *x, gdouble *y) {
+  /* From -1 to +1. The default used to be 0 to 1, which produced
+   * some neat effects, but made a silly default. This, by default,
+   * looks a lot like circular_uniform but with corners.
+   */
+  *x = uniform_variate()*2 - 1;
+  *y = uniform_variate()*2 - 1;
+}
+
+void initial_func_gaussian (gdouble *x, gdouble *y) {
+  /* Just a unit normal in each axis */
+  *x = normal_variate();
+  *y = normal_variate();
+}
+
+void initial_func_circular_uniform (gdouble *x, gdouble *y) {
+  /* A uniform distribution in each axis, but discarding
+   * all values that fall outside the unit circle. This
+   * gives a similar look to square_uniform, but with smooth
+   * edges rather than corners.
+   */
+  gdouble i, j;
+  do {
+    i = uniform_variate()*2 - 1;
+    j = uniform_variate()*2 - 1;
+  } while ( (i*i + j*j) > 1 );
+  *x = i;
+  *y = j;
+}
+
+void initial_func_radial (gdouble *x, gdouble *y) {
+  /* Pick a radius and angle uniformly, then convert to cartesian
+   * coordinates. This also produces a unit circle, but it isn't
+   * uniform- it has a strong dense spot in the center that fades
+   * off toward the edges. Unlike gaussian, this still has distinct
+   * edges.
+   */
+  gdouble theta = uniform_variate() * M_PI * 2;
+  gdouble radius = uniform_variate();
+  *x = cos(theta) * radius;
+  *y = sin(theta) * radius;
+}
+
+void initial_func_sphere (gdouble *x, gdouble *y) {
+  /* The opposite of radial's effect- a circle that's dense at
+   * the edges and light in the center. This creates a distribution
+   * uniform along the surface of a sphere, then flattens it.
+   *
+   * We currently implement this by normalizing the vector produced
+   * by three normal variates- this is really slow.
+   */
+  gdouble vx = normal_variate();
+  gdouble vy = normal_variate();
+  gdouble vz = normal_variate();
+  gdouble mag = sqrt(vx*vx + vy*vy + vz*vz);
+  *x = vx / mag;
+  *y = vy / mag;
+}
+
+
+/************************************************************************************/
+/**************************************************************************** Tools */
+/************************************************************************************/
+
+static ToolInfoPH *de_jong_get_tools() {
+  return (ToolInfoPH*) tool_table;
+}
+
+static void tool_grab(ParameterHolder *self, ToolInput *i) {}
+static void tool_blur(ParameterHolder *self, ToolInput *i) {}
+static void tool_zoom(ParameterHolder *self, ToolInput *i) {}
+static void tool_rotate(ParameterHolder *self, ToolInput *i) {}
+static void tool_exposure_gamma(ParameterHolder *self, ToolInput *i) {}
+static void tool_a_b(ParameterHolder *self, ToolInput *i) {}
+static void tool_a_c(ParameterHolder *self, ToolInput *i) {}
+static void tool_a_d(ParameterHolder *self, ToolInput *i) {}
+static void tool_b_c(ParameterHolder *self, ToolInput *i) {}
+static void tool_b_d(ParameterHolder *self, ToolInput *i) {}
+static void tool_c_d(ParameterHolder *self, ToolInput *i) {}
+static void tool_ab_cd(ParameterHolder *self, ToolInput *i) {}
+static void tool_ac_bd(ParameterHolder *self, ToolInput *i) {}
 
 /* The End */

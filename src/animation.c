@@ -1,7 +1,7 @@
 /*
  * animation.c - A simple keyframe animation system for ParameterHolder objects
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -34,13 +34,21 @@ static void animation_keyframe_append_default(Animation *self, GtkTreeIter *iter
 /* Animations are serialized using chunked-file.
  * These are the chunk types and file signature
  */
-#define FILE_SIGNATURE        "de Jong Explorer Animation\n\r\xFF\n"
+#define FILE_SIGNATURE        "Fyre Animation\n\r\xFF\n"
 #define CHUNK_KEYFRAME_START  CHUNK_TYPE('K','f','r','S')   /* Begin a new keyframe definition */
 #define CHUNK_KEYFRAME_END    CHUNK_TYPE('K','f','r','E')   /* End a keyframe definition */
-#define CHUNK_DE_JONG_PARAMS  CHUNK_TYPE('d','j','P','R')   /* Set de-jong parameters, represented as a string */
-#define CHUNK_THUMBNAIL       CHUNK_TYPE('d','j','T','p')   /* Set a thumbnail, represented as a serialized GdkPixdata */
+#define CHUNK_FYRE_PARAMS     CHUNK_TYPE('f','y','P','R')   /* Set fyre parameters, represented as a string */
+#define CHUNK_THUMBNAIL       CHUNK_TYPE('f','y','T','p')   /* Set a thumbnail, represented as a serialized GdkPixdata */
 #define CHUNK_SPLINE          CHUNK_TYPE('s','p','l','C')   /* Spline control points */
 #define CHUNK_DURATION        CHUNK_TYPE('d','u','r','a')   /* Transition duration, as a double */
+
+/* We never write this signature or these chunk types,
+ * but they're supported for backward compatibility
+ * with de Jong Explorer animation files.
+ */
+#define OLD_FILE_SIGNATURE    "de Jong Explorer Animation\n\r\xFF\n"
+#define CHUNK_DE_JONG_PARAMS  CHUNK_TYPE('d','j','P','R')   /* Set de-jong parameters, represented as a string */
+#define CHUNK_OLD_THUMBNAIL   CHUNK_TYPE('d','j','T','p')   /* Set a thumbnail, represented as a serialized GdkPixdata */
 
 
 /************************************************************************************/
@@ -215,7 +223,7 @@ void animation_generate_chunks(Animation *self, ChunkCallback callback, gpointer
   gboolean valid;
   gchar *params;
   GdkPixbuf *thumb_pixbuf;
-  gchar *buffer;
+  guchar *buffer;
   guint buffer_len;
   gdouble duration;
   Spline *spline;
@@ -235,7 +243,7 @@ void animation_generate_chunks(Animation *self, ChunkCallback callback, gpointer
     callback(user_data, CHUNK_KEYFRAME_START, 0, NULL);
 
     if (params) {
-      callback(user_data, CHUNK_DE_JONG_PARAMS, strlen(params), params);
+      callback(user_data, CHUNK_FYRE_PARAMS, strlen((void *) params), (void *) params);
       g_free(params);
     }
 
@@ -249,7 +257,7 @@ void animation_generate_chunks(Animation *self, ChunkCallback callback, gpointer
     callback(user_data, CHUNK_DURATION, sizeof(duration), (guchar*) &duration);
 
     if (spline) {
-      buffer = spline_serialize(spline, &buffer_len);
+      buffer = spline_serialize(spline, (gsize *) &buffer_len);
       callback(user_data, CHUNK_SPLINE, buffer_len, buffer);
       g_free(buffer);
       spline_free(spline);
@@ -285,20 +293,22 @@ void animation_store_chunk(AnimChunkState *state,
     /* Ending a keyframe. We don't yet need this for anything */
     break;
 
-  case CHUNK_DE_JONG_PARAMS:
+  case CHUNK_DE_JONG_PARAMS:   /* For compatibility */
+  case CHUNK_FYRE_PARAMS:
     /* Set the de Jong parameters for this keyframe. Note that the
      * data in the file is not null terminated, hence the need to
      * copy it into a string we can null-terminate.
      */
     tempstring = g_malloc(length+1);
     tempstring[length] = '\0';
-    memcpy(tempstring, data, length);
+    memcpy(tempstring, (void *) data, length);
     gtk_list_store_set(state->self->model, &state->iter,
 		       ANIMATION_MODEL_PARAMS, tempstring,
 		       -1);
     g_free(tempstring);
     break;
 
+  case CHUNK_OLD_THUMBNAIL:   /* For compatibility */
   case CHUNK_THUMBNAIL:
     /* Set the thumbnail for this keyframe */
     gdk_pixdata_deserialize(&pixdata, length, data, NULL);
@@ -316,7 +326,7 @@ void animation_store_chunk(AnimChunkState *state,
     }
     else {
       g_log(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
-	    "Duration chunk is incorrectly sized, %d bytes instead of %d",
+	    "Duration chunk is incorrectly sized, %ld bytes instead of %ld",
 	    length, sizeof(gdouble));
     }
     break;
@@ -340,7 +350,8 @@ void animation_load_file(Animation *self, const gchar *filename) {
   AnimChunkState state;
 
   g_return_if_fail(f = fopen(filename, "rb"));
-  g_return_if_fail(chunked_file_read_signature(f, FILE_SIGNATURE));
+  g_return_if_fail(chunked_file_read_signature(f, FILE_SIGNATURE) ||
+		   chunked_file_read_signature(f, OLD_FILE_SIGNATURE));
 
   animation_clear(self);
   state.self = self;

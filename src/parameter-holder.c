@@ -3,7 +3,7 @@
  *                      algorithm parameters that can be serialized to key/value
  *                      pairs and interpolated between.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -24,13 +24,15 @@
 
 #include "parameter-holder.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 static void parameter_holder_class_init(ParameterHolderClass *klass);
 
-static void value_transform_string_uint(const GValue *src_value, GValue *dest_value);
-static void value_transform_string_double(const GValue *src_value, GValue *dest_value);
-static void value_transform_string_boolean(const GValue *src_value, GValue *dest_value);
-static void value_transform_string_ulong(const GValue *src_value, GValue *dest_value);
+static void value_transform_string_uint    (const GValue *src_value, GValue *dest_value);
+static void value_transform_string_double  (const GValue *src_value, GValue *dest_value);
+static void value_transform_string_boolean (const GValue *src_value, GValue *dest_value);
+static void value_transform_string_ulong   (const GValue *src_value, GValue *dest_value);
+static void value_transform_string_enum    (const GValue *src_value, GValue *dest_value);
 
 
 /************************************************************************************/
@@ -70,6 +72,7 @@ static void parameter_holder_class_init(ParameterHolderClass *klass) {
   g_value_register_transform_func(G_TYPE_STRING, G_TYPE_DOUBLE,  value_transform_string_double);
   g_value_register_transform_func(G_TYPE_STRING, G_TYPE_BOOLEAN, value_transform_string_boolean);
   g_value_register_transform_func(G_TYPE_STRING, G_TYPE_ULONG,   value_transform_string_ulong);
+  g_value_register_transform_func(G_TYPE_STRING, G_TYPE_ENUM,    value_transform_string_enum);
 }
 
 ParameterHolder* parameter_holder_new() {
@@ -111,6 +114,18 @@ static void value_transform_string_boolean(const GValue *src_value, GValue *dest
 
 static void value_transform_string_ulong(const GValue *src_value, GValue *dest_value) {
   dest_value->data[0].v_ulong = strtoul(src_value->data[0].v_pointer, NULL, 10);
+}
+
+static void value_transform_string_enum(const GValue *src_value, GValue *dest_value) {
+  GEnumClass *klass = g_type_class_ref(G_VALUE_TYPE(dest_value));
+  GEnumValue *enum_value = g_enum_get_value_by_name(klass, src_value->data[0].v_pointer);
+
+  if (enum_value)
+    dest_value->data[0].v_int = enum_value->value;
+  else
+    dest_value->data[0].v_int = 0;
+
+  g_type_class_unref(klass);
 }
 
 
@@ -229,8 +244,18 @@ void parameter_holder_interpolate_linear(ParameterHolder *self, double alpha, Pa
 
       else if (properties[i]->value_type == G_TYPE_UINT) {
 	g_value_set_uint(&self_val,
-			 g_value_get_uint(&a_val) * (1-alpha) +
-			 g_value_get_uint(&a_val) * (alpha));
+			 (guint) (g_value_get_uint(&a_val) * (1-alpha) +
+				  g_value_get_uint(&b_val) * (alpha) + 0.5));
+      }
+
+      else if (G_TYPE_IS_ENUM(properties[i]->value_type)) {
+	/* We can't interpolate between enums but, like bools, they can
+	 * be changed during the animation.
+	 */
+	if (alpha < 0.5)
+	  g_value_set_enum(&self_val, g_value_get_enum(&a_val));
+	else
+	  g_value_set_enum(&self_val, g_value_get_enum(&b_val));
       }
 
       else {
@@ -339,6 +364,11 @@ void parameter_holder_load_string(ParameterHolder *self, const gchar *params) {
   g_free(copy);
 }
 
+ToolInfoPH* parameter_holder_get_tools(ParameterHolder *self) {
+  ParameterHolderClass *class = PARAMETER_HOLDER_CLASS(G_OBJECT_GET_CLASS(self));
+  return class->get_tools();
+}
+
 void param_spec_set_group (GParamSpec  *pspec,
 			   const gchar *group_name) {
   g_param_spec_set_qdata(pspec, g_quark_from_static_string("group-name"), (gpointer) group_name);
@@ -355,12 +385,21 @@ void param_spec_set_increments (GParamSpec  *pspec,
   g_param_spec_set_qdata_full(pspec, g_quark_from_static_string("increments"), pi, g_free);
 }
 
+void param_spec_set_dependency (GParamSpec  *pspec,
+				const gchar *dependency_name) {
+  g_param_spec_set_qdata(pspec, g_quark_from_static_string("dependency"), (gpointer) dependency_name);
+}
+
 const gchar* param_spec_get_group (GParamSpec  *pspec) {
   return g_param_spec_get_qdata(pspec, g_quark_from_static_string("group-name"));
 }
 
 const ParameterIncrements* param_spec_get_increments (GParamSpec  *pspec) {
   return g_param_spec_get_qdata(pspec, g_quark_from_static_string("increments"));
+}
+
+const gchar* param_spec_get_dependency (GParamSpec  *pspec) {
+  return g_param_spec_get_qdata(pspec, g_quark_from_static_string("dependency"));
 }
 
 /* The End */

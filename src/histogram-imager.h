@@ -3,7 +3,7 @@
  *                      images from it. Supports oversampling, gamma correction,
  *                      color interpolation, and exposure adjustment.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -55,6 +55,7 @@ struct _HistogramImager {
    * histogram, only the image generated from it.
    */
   gdouble exposure, gamma;
+  gdouble oversample_gamma;
   GdkColor fgcolor, bgcolor;
   guint fgalpha, bgalpha;
   gboolean clamped;
@@ -71,9 +72,25 @@ struct _HistogramImager {
 
   GdkPixbuf *image;
 
-  guint color_table_allocated_size;
-  guint color_table_filled_size;
-  guint32 *color_table;
+  /* Color table, converts from histogram samples to RGB colors */
+  struct {
+    guint allocated_size;
+    guint filled_size;
+    guint32 *table;
+  } color_table;
+
+  /* Oversampling gamma tables. For particular values of 'oversample',
+   * and 'oversample_gamma', these tables convert from 8-bit nonlinear
+   * channel value to higher precision linear values that are then
+   * summed and put through a second table for conversion back to
+   * nonlinear 8-bit.
+   */
+  struct {
+    gdouble   gamma;
+    guint     oversample;
+    guint*  linearize;
+    guint8*   nonlinearize;
+  } oversample_tables;
 };
 
 struct _HistogramImagerClass {

@@ -4,7 +4,7 @@
  *                         and the other axis shows a 1 dimensional projection of the
  *                         image at those parameters.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -25,7 +25,6 @@
 
 #include "bifurcation-diagram.h"
 #include "math-util.h"
-#include <math.h>
 
 static void               bifurcation_diagram_class_init        (BifurcationDiagramClass *klass);
 static void               bifurcation_diagram_init              (BifurcationDiagram      *self);
@@ -169,7 +168,7 @@ static void bifurcation_diagram_init_columns (BifurcationDiagram *self) {
 
     /* Shuffle them, so we render in a seemingly-random order */
     for (i=self->num_columns-1; i>=0; i--) {
-      j = ((int) random() % (i+1));
+      j = g_random_int_range(0, i+1);
       tmp = self->columns[i].ix;
       self->columns[i].ix = self->columns[j].ix;
       self->columns[j].ix = tmp;
@@ -220,8 +219,8 @@ static void bifurcation_diagram_get_column_params (BifurcationDiagram *self,
 						   BifurcationColumn  *column,
 						   DeJongParams       *param) {
   /* Get a random parameter set from the given column, creating it if necessary */
-  int interpIndex = random() % (sizeof(self->columns[0].interpolated)/
-				sizeof(self->columns[0].interpolated[0]));
+  int interpIndex = g_random_int_range(0, sizeof(self->columns[0].interpolated)/
+				       sizeof(self->columns[0].interpolated[0]));
 
   if (!column->interpolated[interpIndex].valid) {
 

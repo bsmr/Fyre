@@ -2,7 +2,7 @@
  * de-jong.h - The DeJong object builds on the ParameterHolder and HistogramRender
  *             objects to provide a rendering of the DeJong map into a histogram image.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -25,7 +25,7 @@
 #define __DE_JONG_H__
 
 #include <gtk/gtk.h>
-#include "histogram-imager.h"
+#include "iterative-map.h"
 
 G_BEGIN_DECLS
 
@@ -43,22 +43,29 @@ typedef struct {
 } DeJongParams;
 
 struct _DeJong {
-  HistogramImager parent;
+  IterativeMap parent;
 
   /* Calculation Parameters */
   DeJongParams param;
-  gdouble zoom, xoffset, yoffset, rotation;
+  gdouble zoom, aspect, xoffset, yoffset, rotation;
   gdouble blur_radius, blur_ratio;
   gboolean tileable;
+
+  gboolean emphasize_transient;
+  guint transient_iterations;
+  gint initial_conditions;
+  gdouble initial_xscale, initial_yscale;
+  gdouble initial_xoffset, initial_yoffset;
+
   gboolean calc_dirty_flag;
 
   /* Current calculation state */
   gdouble point_x, point_y;
-  gdouble iterations;
+  guint remaining_transient_iterations;
 };
 
 struct _DeJongClass {
-  HistogramImagerClass parent_class;
+  IterativeMapClass parent_class;
 };
 
 
@@ -68,15 +75,6 @@ struct _DeJongClass {
 
 GType      de_jong_get_type         ();
 DeJong*    de_jong_new              ();
-
-void       de_jong_calculate        (DeJong                *self,
-				     guint                  iterations);
-
-void       de_jong_calculate_motion (DeJong                *self,
-				     guint                  iterations,
-				     gboolean               continuation,
-				     ParameterInterpolator *interp,
-				     gpointer               interp_data);
 
 G_END_DECLS
 

@@ -1,7 +1,7 @@
 /*
  * histogram-view.h - A DrawingArea subclass that displays the results of a HistogramImager
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -59,9 +59,11 @@ struct _HistogramViewClass {
 /******************************************************************* Public Methods */
 /************************************************************************************/
 
-GType      histogram_view_get_type (void);
-GtkWidget* histogram_view_new      (HistogramImager *imager);
-void       histogram_view_update   (HistogramView   *self);
+GType      histogram_view_get_type   (void);
+GtkWidget* histogram_view_new        (HistogramImager *imager);
+void       histogram_view_update     (HistogramView   *self);
+void       histogram_view_set_imager (HistogramView   *self,
+				      HistogramImager *imager);
 
 G_END_DECLS
 

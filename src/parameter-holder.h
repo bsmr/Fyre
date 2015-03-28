@@ -3,7 +3,7 @@
  *                      algorithm parameters that can be serialized to key/value
  *                      pairs and interpolated between.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -38,12 +38,36 @@ G_BEGIN_DECLS
 typedef struct _ParameterHolder      ParameterHolder;
 typedef struct _ParameterHolderClass ParameterHolderClass;
 
+typedef struct _ToolInput {
+  double delta_x, delta_y;
+  double absolute_x, absolute_y;
+  double click_relative_x, click_relative_y;
+  double delta_time;
+  GdkModifierType state;
+} ToolInput;
+
 struct _ParameterHolder {
   GObject object;
 };
 
+typedef void (ToolHandlerPH)(ParameterHolder *self, ToolInput *i);
+
+typedef enum {
+  TOOL_USE_MOTION_EVENTS = 1 << 0,
+  TOOL_USE_IDLE          = 1 << 1,
+} ToolFlags;
+
+typedef struct _ToolInfoPH {
+  gchar *menu_label;
+  ToolHandlerPH *handler;
+  ToolFlags flags;
+} ToolInfoPH;
+
 struct _ParameterHolderClass {
   GObjectClass parent_class;
+
+  /* Overrideable methods */
+  ToolInfoPH* (*get_tools) ();
 };
 
 typedef void (ParameterInterpolator)(ParameterHolder  *self,
@@ -93,9 +117,11 @@ void              parameter_holder_interpolate_linear (ParameterHolder     *self
 						       gdouble              alpha,
 						       ParameterHolderPair *p);
 
+ToolInfoPH*       parameter_holder_get_tools          (ParameterHolder *self);
+
 /*
  * These functions make it easy to assign extra metadata to GParamSpecs
- * that can be used when automatically builting GUIs for ParameterHolder instances.
+ * that can be used when automatically building GUIs for ParameterHolder instances.
  */
 
 void              param_spec_set_group      (GParamSpec  *pspec,
@@ -106,9 +132,14 @@ void              param_spec_set_increments (GParamSpec  *pspec,
 					     gdouble      page,
 					     int          digits);
 
+void              param_spec_set_dependency (GParamSpec  *pspec,
+					     const gchar *dependency_name);
+
 const gchar*      param_spec_get_group      (GParamSpec  *pspec);
 
 const ParameterIncrements* param_spec_get_increments (GParamSpec  *pspec);
+
+const gchar*      param_spec_get_dependency (GParamSpec  *pspec);
 
 
 G_END_DECLS

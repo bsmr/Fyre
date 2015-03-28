@@ -1,7 +1,7 @@
 /*
  * explorer-animation.c - Implements the explorer GUI's animation editor
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -181,7 +181,7 @@ static void explorer_get_current_keyframe(Explorer *self, GtkTreeIter *iter) {
 
 static void on_keyframe_add(GtkWidget *widget, gpointer user_data) {
   Explorer *self = EXPLORER(user_data);
-  animation_keyframe_append(self->animation, PARAMETER_HOLDER(self->dejong));
+  animation_keyframe_append(self->animation, PARAMETER_HOLDER(self->map));
   explorer_update_animation_length(self);
 }
 
@@ -189,7 +189,7 @@ static void on_keyframe_replace(GtkWidget *widget, gpointer user_data) {
   Explorer *self = EXPLORER(user_data);
   GtkTreeIter iter;
   explorer_get_current_keyframe(self, &iter);
-  animation_keyframe_store(self->animation, &iter, PARAMETER_HOLDER(self->dejong));
+  animation_keyframe_store(self->animation, &iter, PARAMETER_HOLDER(self->map));
 }
 
 static void on_keyframe_delete(GtkWidget *widget, gpointer user_data) {
@@ -236,7 +236,7 @@ static void on_keyframe_view_cursor_changed(GtkWidget *widget, gpointer user_dat
     /* Now load this keyframe's parameters. Usually seeking won't do this,
      * but we need to make sure because zero-duration keyframes can't be seeked to.
      */
-    animation_keyframe_load(self->animation, &iter, PARAMETER_HOLDER(self->dejong));
+    animation_keyframe_load(self->animation, &iter, PARAMETER_HOLDER(self->map));
 
     /* Set the transition scale to zero. Normally setting anim_scale would be
      * enough, but if the keyframe changes but the scale value doesn't (such
@@ -408,7 +408,7 @@ static void on_anim_scale_changed(GtkWidget *widget, gpointer user_data) {
   animation_iter_seek(self->animation, &iter, v);
   if (iter.valid) {
 
-    animation_iter_load(self->animation, &iter, PARAMETER_HOLDER(self->dejong));
+    animation_iter_load(self->animation, &iter, PARAMETER_HOLDER(self->map));
 
     /* Seek the transition_scale to our current position within the current keyframe */
     if (!self->seeking_animation_transition) {
@@ -521,7 +521,7 @@ static void on_anim_save_as(GtkWidget *widget, gpointer user_data) {
   GtkWidget *dialog;
 
   dialog = gtk_file_selection_new("Save Animation Keyframes");
-  gtk_file_selection_set_filename(GTK_FILE_SELECTION(dialog), "animation.dja");
+  gtk_file_selection_set_filename(GTK_FILE_SELECTION(dialog), "animation.fa");
 
   if(gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
     const gchar *filename;

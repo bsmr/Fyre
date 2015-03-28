@@ -1,7 +1,7 @@
 /*
  * main.c - Initialization and command line interface
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -28,6 +28,7 @@
 #include "animation.h"
 #include "explorer.h"
 #include "avi-writer.h"
+#include "screensaver.h"
 
 static void usage                  (char       **argv);
 static void animation_render_main  (DeJong      *dejong,
@@ -43,12 +44,12 @@ int main(int argc, char ** argv) {
   DeJong* dejong;
   Animation* animation;
   gboolean animate = FALSE;
-  enum {INTERACTIVE, RENDER} mode = INTERACTIVE;
+  enum {INTERACTIVE, RENDER, SCREENSAVER} mode = INTERACTIVE;
   const gchar *outputFile;
   int c, option_index=0;
   gulong target_density = 10000;
 
-  srand(time(NULL));
+  g_random_set_seed(time(NULL));
   g_type_init();
 
   dejong = de_jong_new();
@@ -75,6 +76,7 @@ int main(int argc, char ** argv) {
       {"fg-alpha",    1, NULL, 1007},
       {"bg-alpha",    1, NULL, 1008},
       {"animate",     1, NULL, 'n'},
+      {"screensaver", 0, NULL, 1009},
       NULL,
     };
     c = getopt_long(argc, argv, "hi:o:a:b:c:d:x:y:z:r:e:g:s:t:n:",
@@ -119,6 +121,10 @@ int main(int argc, char ** argv) {
       animate = TRUE;
       break;
 
+    case 1009:
+      mode = SCREENSAVER;
+      break;
+
     case 't':
       target_density = atol(optarg);
       break;
@@ -139,7 +145,7 @@ int main(int argc, char ** argv) {
 
   case INTERACTIVE:
     gtk_init(&argc, &argv);
-    explorer_new(dejong, animation);
+    explorer_new(ITERATIVE_MAP(dejong), animation);
     gtk_main();
     break;
 
@@ -148,6 +154,12 @@ int main(int argc, char ** argv) {
       animation_render_main(dejong, animation, outputFile, target_density);
     else
       image_render_main(dejong, outputFile, target_density);
+    break;
+
+  case SCREENSAVER:
+    gtk_init(&argc, &argv);
+    screensaver_new(ITERATIVE_MAP(dejong), animation);
+    gtk_main();
     break;
   }
 
@@ -221,7 +233,7 @@ static void image_render_main (DeJong     *dejong,
   double iterations;
 
   while (HISTOGRAM_IMAGER(dejong)->peak_density < target_density) {
-    de_jong_calculate(dejong, 1000000);
+    iterative_map_calculate(ITERATIVE_MAP(dejong), 1000000);
 
     /* This should be a fairly accurate time estimate, since (asymptotically at least)
      * current_density increases linearly with the number of iterations performed.
@@ -234,9 +246,9 @@ static void image_render_main (DeJong     *dejong,
      * of iterations (in scientific notation), iterations per second,
      * density / target density, and elapsed time / remaining time.
      */
-    printf("%6.02f%%   %.3e   %.2e/sec   %6d / %d   %02d:%02d:%02d / %02d:%02d:%02d\n",
+    printf("%6.02f%%   %.3e   %.2e/sec   %6ld / %ld   %02d:%02d:%02d / %02d:%02d:%02d\n",
 	   100.0 * HISTOGRAM_IMAGER(dejong)->peak_density / target_density,
-	   dejong->iterations, dejong->iterations / elapsed,
+	   ITERATIVE_MAP(dejong)->iterations, ITERATIVE_MAP(dejong)->iterations / elapsed,
 	   HISTOGRAM_IMAGER(dejong)->peak_density, target_density,
 	   ((int)elapsed) / (60*60), (((int)elapsed) / 60) % 60, ((int)elapsed)%60,
 	   ((int)remaining) / (60*60), (((int)remaining) / 60) % 60, ((int)remaining)%60);
@@ -268,10 +280,10 @@ static void animation_render_main (DeJong      *dejong,
 
     continuation = FALSE;
     do {
-      de_jong_calculate_motion(dejong, 100000, continuation,
+      iterative_map_calculate_motion(ITERATIVE_MAP(dejong), 100000, continuation,
 			       PARAMETER_INTERPOLATOR(parameter_holder_interpolate_linear),
 			       &frame);
-      printf("Frame %d, %e iterations, %d density\n", frame_count, dejong->iterations, HISTOGRAM_IMAGER(dejong)->peak_density);
+      printf("Frame %d, %e iterations, %ld density\n", frame_count, ITERATIVE_MAP(dejong)->iterations, HISTOGRAM_IMAGER(dejong)->peak_density);
       continuation = TRUE;
     } while (HISTOGRAM_IMAGER(dejong)->peak_density < target_density);
 

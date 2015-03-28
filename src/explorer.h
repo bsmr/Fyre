@@ -1,7 +1,8 @@
 /*
- * explorer.h - An interactive GUI for manipulating a DeJong object and viewing its output
+ * explorer.h - An interactive GUI for manipulating an IterativeMap
+ *              object and viewing its output
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -25,7 +26,6 @@
 
 #include <gtk/gtk.h>
 #include <glade/glade.h>
-#include "de-jong.h"
 #include "animation.h"
 #include "animation-render-ui.h"
 
@@ -43,7 +43,7 @@ typedef struct _ExplorerClass ExplorerClass;
 struct _Explorer {
   GObject object;
 
-  DeJong *dejong;
+  IterativeMap *map;
   Animation *animation;
 
   GladeXML *xml;
@@ -88,7 +88,7 @@ struct _ExplorerClass {
 /************************************************************************************/
 
 GType      explorer_get_type();
-Explorer*  explorer_new(DeJong *dejong, Animation *animation);
+Explorer*  explorer_new(IterativeMap *map, Animation *animation);
 
 
 /************************************************************************************/

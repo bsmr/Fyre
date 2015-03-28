@@ -2,7 +2,7 @@
  * animation-render-ui.h - A user interface for preparing an animation
  *                         rendering and viewing its progress.
  *
- * de Jong Explorer - interactive exploration of the Peter de Jong attractor
+ * Fyre - rendering and interactive exploration of chaotic functions
  * Copyright (C) 2004 David Trowbridge and Micah Dowty
  *
  * This program is free software; you can redistribute it and/or
@@ -26,6 +26,7 @@
 
 #include <gtk/gtk.h>
 #include <glade/glade.h>
+#include "iterative-map.h"
 #include "de-jong.h"
 #include "animation.h"
 #include "avi-writer.h"
@@ -53,7 +54,7 @@ struct _AnimationRenderUi {
   guint width, height, oversample;
   gulong target_density;
 
-  DeJong *dejong;
+  IterativeMap *map;
   AviWriter *avi;
   AnimationIter iter;
   ParameterHolderPair frame;
