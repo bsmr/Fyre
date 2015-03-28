@@ -56,6 +56,7 @@ static gboolean on_interactive_prefs_delete(GtkWidget *widget, GdkEvent *event, 
 static gboolean on_cluster_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data);
 static void on_about_activate(GtkWidget *widget, Explorer *self);
 
+static gchar *file_location = NULL;
 
 /************************************************************************************/
 /**************************************************** Initialization / Finalization */
@@ -92,7 +93,8 @@ static void explorer_class_init(ExplorerClass *klass) {
 }
 
 static void explorer_init(Explorer *self) {
-    self->xml = glade_xml_new (FYRE_DATADIR "/explorer.glade", NULL, NULL);
+    if (g_file_test (FYRE_DATADIR "/explorer.glade", G_FILE_TEST_EXISTS))
+        self->xml = glade_xml_new (FYRE_DATADIR "/explorer.glade", NULL, NULL);
 #ifdef ENABLE_BINRELOC
     if (!self->xml)
 	self->xml = glade_xml_new(BR_DATADIR("/fyre/explorer.glade"), NULL, NULL);
@@ -274,7 +276,6 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
     GdkPixbuf *image_pixbuf, *temp;
     static GdkPixbuf *emblem_pixbuf = NULL;
     gchar *filename;
-    gboolean have_preview;
     GdkPixmap *pixmap;
     gint width, height;
 
@@ -287,11 +288,18 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
     }
 
     filename = gtk_file_chooser_get_filename (chooser);
+    if (filename == NULL) {
+	gtk_file_chooser_set_preview_widget_active (chooser, FALSE);
+	return;
+    }
 
     image_pixbuf = gdk_pixbuf_new_from_file_at_size (filename, 112, 112, NULL);
+    if (image_pixbuf == NULL) {
+	gtk_file_chooser_set_preview_widget_active (chooser, FALSE);
+	return;
+    }
     width = gdk_pixbuf_get_width (image_pixbuf);
     height = gdk_pixbuf_get_height (image_pixbuf);
-    have_preview = (image_pixbuf != NULL);
 
     pixmap = gdk_pixmap_new (GTK_WIDGET (image)->window, width + 16, height + 16, -1);
     gdk_draw_rectangle (pixmap, GTK_WIDGET (image)->style->bg_gc[GTK_STATE_NORMAL], TRUE, 0, 0, width + 16, height + 16);
@@ -311,7 +319,7 @@ update_image_preview (GtkFileChooser *chooser, GtkImage *image) {
 
     gtk_image_set_from_pixmap (GTK_IMAGE (image), pixmap, NULL);
     gdk_pixmap_unref (pixmap);
-    gtk_file_chooser_set_preview_widget_active (chooser, have_preview);
+    gtk_file_chooser_set_preview_widget_active (chooser, TRUE);
 }
 #endif
 
@@ -326,15 +334,22 @@ static void on_load_from_image (GtkWidget *widget, gpointer user_data) {
 		                          GTK_WINDOW (glade_xml_get_widget (self->xml, "explorer_window")),
 					  GTK_FILE_CHOOSER_ACTION_OPEN,
 					  GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-					  GTK_STOCK_OK, GTK_RESPONSE_OK,
+					  GTK_STOCK_OPEN, GTK_RESPONSE_OK,
 					  NULL);
+    gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
     image = gtk_image_new ();
     gtk_file_chooser_set_preview_widget (GTK_FILE_CHOOSER (dialog), image);
     g_signal_connect (G_OBJECT (dialog), "update-preview", G_CALLBACK (update_image_preview), image);
+    if (file_location)
+	gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), file_location);
 
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));
 	histogram_imager_load_image_file (HISTOGRAM_IMAGER (self->map), filename, &error);
+
+	if (file_location)
+	    g_free (file_location);
+	file_location = gtk_file_chooser_get_current_folder (GTK_FILE_CHOOSER (dialog));
     }
 #else
     dialog = gtk_file_selection_new ("Open Image Parameters");
@@ -359,7 +374,7 @@ static void on_load_from_image (GtkWidget *widget, gpointer user_data) {
 	g_error_free (error);
 
 	gtk_dialog_run (GTK_DIALOG (dialog));
-	gtk_widget_hide_all (dialog);
+	gtk_widget_hide (dialog);
     }
     g_free (filename);
 }
@@ -375,20 +390,26 @@ static void on_save (GtkWidget *widget, gpointer user_data) {
 		                          GTK_WINDOW (glade_xml_get_widget (self->xml, "explorer_window")),
 					  GTK_FILE_CHOOSER_ACTION_SAVE,
 					  GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-					  GTK_STOCK_OK, GTK_RESPONSE_OK,
+					  GTK_STOCK_SAVE, GTK_RESPONSE_OK,
 					  NULL);
+    gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
     gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog), "rendering.png");
+    if (file_location != NULL)
+        gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), file_location);
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));
 	histogram_imager_save_image_file (HISTOGRAM_IMAGER (self->map), filename, &error);
+
+	if (file_location)
+            g_free (file_location);
+	file_location = gtk_file_chooser_get_current_folder (GTK_FILE_CHOOSER (dialog));
     }
 #else
     dialog = gtk_file_selection_new ("Save Image");
     gtk_file_selection_set_filename (GTK_FILE_SELECTION (dialog), "rendering.png");
 
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
-	const gchar *filename;
-	filename = gtk_file_selection_get_filename (GTK_FILE_SELECTION (dialog));
+	filename = g_strdup (gtk_file_selection_get_filename (GTK_FILE_SELECTION (dialog)));
 	histogram_imager_save_image_file (HISTOGRAM_IMAGER (self->map), filename, &error);
     }
 #endif
@@ -407,7 +428,7 @@ static void on_save (GtkWidget *widget, gpointer user_data) {
 	g_error_free (error);
 
 	gtk_dialog_run (GTK_DIALOG (dialog));
-	gtk_widget_hide_all (dialog);
+	gtk_widget_hide (dialog);
     }
 
     if (filename)
@@ -418,21 +439,28 @@ static void on_save_exr (GtkWidget *widget, gpointer user_data) {
 #ifdef HAVE_EXR
     Explorer *self = EXPLORER (user_data);
     GtkWidget *dialog;
+    GError *error = NULL;
+    gchar *filename = NULL;
 
 #if (GTK_CHECK_VERSION(2, 4, 0))
     dialog = gtk_file_chooser_dialog_new ("Save OpenEXR Image",
 		                          GTK_WINDOW (glade_xml_get_widget (self->xml, "explorer_window")),
 					  GTK_FILE_CHOOSER_ACTION_SAVE,
 					  GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-					  GTK_STOCK_OK, GTK_RESPONSE_OK,
+					  GTK_STOCK_SAVE, GTK_RESPONSE_OK,
 					  NULL);
+    gtk_dialog_set_default_response (GTK_DIALOG (dialog), GTK_RESPONSE_OK);
+    if (file_location != NULL)
+        gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), file_location);
     gtk_file_chooser_set_filename (GTK_FILE_CHOOSER (dialog), "rendering.exr");
 
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
-        gchar *filename;
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (dialog));
-	exr_save_image_file (HISTOGRAM_IMAGER (self->map), filename);
-	g_free (filename);
+	exr_save_image_file (HISTOGRAM_IMAGER (self->map), filename, &error);
+
+	if (file_location)
+	    g_free (file_location);
+	file_location = gtk_file_chooser_get_current_folder (GTK_FILE_CHOOSER (dialog));
     }
 #else
     dialog = gtk_file_selection_new ("Save OpenEXR Image");
@@ -440,11 +468,30 @@ static void on_save_exr (GtkWidget *widget, gpointer user_data) {
 
     if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_OK) {
 	const gchar *filename;
-	filename = gtk_file_selection_get_filename (GTK_FILE_SELECTION (dialog));
-	exr_save_image_file (HISTOGRAM_IMAGER (self->map), filename);
+	filename = g_strdup (gtk_file_selection_get_filename (GTK_FILE_SELECTION (dialog)));
+	exr_save_image_file (HISTOGRAM_IMAGER (self->map), filename, &error);
     }
 #endif /* GTK_CHECK_VERSION */
     gtk_widget_destroy (dialog);
+
+    if (error) {
+	GtkWidget *dialog, *label;
+	gchar *text;
+
+	dialog = glade_xml_get_widget (self->xml, "error dialog");
+	label = glade_xml_get_widget (self->xml, "error label");
+
+	text = g_strdup_printf ("<span weight=\"bold\" size=\"larger\">Could not save \"%s\"</span>\n\n%s", filename, error->message);
+	gtk_label_set_markup (GTK_LABEL (label), text);
+	g_free (text);
+	g_error_free (error);
+
+	gtk_dialog_run (GTK_DIALOG (dialog));
+	gtk_widget_hide (dialog);
+    }
+
+    if (filename)
+	g_free (filename);
 #endif /* HAVE_EXR */
 }
 
@@ -625,7 +672,7 @@ static void on_about_close(GtkWidget *widget, Explorer *self)
 {
     GtkWidget *dialog;
     dialog = glade_xml_get_widget(self->xml, "about_window");
-    gtk_widget_hide_all(dialog);
+    gtk_widget_hide(dialog);
 }
 
 static void on_about_activate(GtkWidget *widget, Explorer *self)
